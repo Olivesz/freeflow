@@ -1,5 +1,7 @@
 # freeflow
 
+[![CI](https://github.com/Olivesz/freeflow/actions/workflows/ci.yml/badge.svg)](https://github.com/Olivesz/freeflow/actions/workflows/ci.yml)
+
 A minimal, **local, free** speech-to-text-anywhere tool — a stripped-down
 alternative to Wispr Flow. Tap a key, talk, and your words are typed into
 whatever app has focus. Everything runs on-device (Whisper via faster-whisper);
@@ -96,3 +98,19 @@ Three ideas do the heavy lifting, all in `freeflow/stt.py`:
 3. **Pluggable engines** — both backends emit the same `Word` objects, so the
    whole model swaps via one config line (`model.engine`). End-of-speech
    detection lives in `freeflow/vad.py`.
+
+## Tests
+
+The streaming core is deliberately model-free and deterministic, so it's tested
+without a mic, a model download, or any macOS permission:
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q
+```
+
+Covers config merging, end-of-utterance timing (grace period, silence clock,
+mid-sentence pauses), Whisper non-speech-hallucination filtering, LocalAgreement
+commit semantics, and the append-only + window-trimming properties of the
+streaming driver — including the coarse-timestamp boundary-repeat case that
+whisper.cpp produces after a trim.
