@@ -23,6 +23,7 @@ class EndpointDetector:
         self._silent_ms = 0
         self._elapsed_ms = 0
         self._noise_floor = self.threshold  # running estimate of "quiet room"
+        self._speaking = False
 
     def update(self, rms: float, dt_ms: int) -> bool:
         """Feed one tick. Returns True when the utterance should end."""
@@ -36,24 +37,17 @@ class EndpointDetector:
             self._silent_ms += dt_ms
         return self._silent_ms >= self.silence_ms
 
-    # ------------------------------------------------------------------ #
-    # TODO(you): decide what counts as "still speaking".
-    #
-    # Baseline below just compares loudness to a fixed threshold. It works,
-    # but a fixed number is brittle: a loud cafe or a quiet room shifts the
-    # right cutoff. This ~5-10 line method is the single biggest lever on how
-    # freeflow *feels*, so it's a good one to own.
-    #
-    # Ideas to consider (pick one, or your own):
-    #   - Adaptive noise floor: track the quietest recent RMS in
-    #     `self._noise_floor` (e.g. slowly decay it toward low readings) and
-    #     call it speech when `rms > noise_floor * K` (K ~ 3-4). This
-    #     auto-calibrates to the room instead of a magic constant.
-    #   - Hysteresis: require a higher level to *start* counting speech than to
-    #     *keep* counting it, so a brief dip mid-sentence doesn't end you early.
-    #
-    # Trade-off to weigh: sensitivity (never clip my last word) vs. latency
-    # (don't make me wait after I clearly stopped).
-    # ------------------------------------------------------------------ #
     def is_speech(self, rms: float) -> bool:
-        return rms > self.threshold
+        # Adaptive noise floor: snap down to quieter readings immediately,
+        # drift up only very slowly — the estimate tracks the ROOM, not the
+        # speech, so a cafe and a silent office both get the right cutoff.
+        if rms < self._noise_floor:
+            self._noise_floor = max(rms, 1e-4)
+        else:
+            self._noise_floor += (rms - self._noise_floor) * 0.005
+        # Hysteresis: opening the gate takes 4x the floor, holding it open
+        # only 2x, so a brief mid-sentence dip doesn't read as silence. The
+        # absolute minimum keeps a near-silent room from becoming hair-trigger.
+        k = 2.0 if self._speaking else 4.0
+        self._speaking = rms > max(self._noise_floor * k, self.threshold * 0.4)
+        return self._speaking
