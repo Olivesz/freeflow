@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Swift / Xcode build artifacts
+mac/.build/
+mac/freeflow.app/
+ios/build/
+xcuserdata/
+
+# Speech models: Python engines download into the HF cache on first run;
+# the CoreML encoder is compiled by mac/build_app.sh.
+*.mlmodelc/
+*.ggml
+ggml-*.bin

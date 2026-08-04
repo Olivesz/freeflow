@@ -1,0 +1,26 @@
+# --- Speech-to-text engine -------------------------------------------------
+# faster-whisper = Whisper reimplemented on CTranslate2 (int8, ~4x faster,
+# lower memory than reference Whisper). Runs on CPU on macOS. Swappable.
+faster-whisper==1.1.1
+
+# --- Audio capture ---------------------------------------------------------
+# sounddevice = thin, well-maintained PortAudio binding. Ships wheels, no
+# system PortAudio build needed. Gives us raw float32 mic frames.
+sounddevice==0.5.1
+numpy==2.2.6
+
+# --- Global hotkey + text injection ---------------------------------------
+# pynput = OS-level keyboard listener (the push-to-talk hotkey) AND a
+# keyboard controller (typing transcribed text into the focused app).
+# On macOS this needs Accessibility + Input Monitoring permissions.
+pynput==1.7.7
+
+# faster-whisper imports `requests` at runtime but doesn't always pin it.
+requests>=2.31
+
+# --- whisper.cpp backend (optional but default) ----------------------------
+# pywhispercpp = Python bindings for whisper.cpp. On Apple Silicon it builds
+# with Metal, so transcription runs on the GPU/Neural Engine instead of the CPU
+# — faster and cooler. Selected via `engine = "whisper.cpp"` in config.toml.
+pywhispercpp==1.5.0
+

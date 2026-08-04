@@ -1,0 +1,29 @@
+# freeflow configuration — edit this like a game keybind file, then restart.
+
+[model]
+engine = "whisper.cpp"      # "whisper.cpp" (Metal/Neural Engine — fastest on Apple Silicon) | "faster-whisper" (CPU)
+name = "base.en"            # base.en = fast + accurate for ENGLISH. See note below for Chinese.
+language = "en"             # "en" | "zh" | "auto"
+compute_type = "int8"       # int8 (lightest) | int8_float16 | float16   (faster-whisper only)
+device = "cpu"              # faster-whisper runs on CPU on macOS
+
+# ── For Simplified Chinese ──────────────────────────────────────────────────
+#   .en models are English-only. Switch to a multilingual model + language:
+#     engine = "whisper.cpp"   (or "faster-whisper")
+#     name = "small"           (or "medium" / "large-v3" for accuracy)
+#     language = "zh"
+#   and set stream.inject = "paste" below (keystroke injection drops CJK).
+
+[trigger]
+mode = "toggle"             # "toggle" = tap to start, tap again OR silence to stop
+                            # "hold"   = push-to-talk: hold key, release to stop
+key = "cmd_r"              # trigger key (pynput name). cmd_r = Right ⌘.
+
+[vad]
+enabled = true             # auto-stop when you stop talking (toggle mode only)
+silence_ms = 1500          # continuous silence that ends the utterance — room for natural pauses
+start_grace_ms = 400       # ignore silence for this long right after you start
+
+[stream]
+tick_ms = 350              # how often to re-transcribe & emit stable words (was 600 — streams sooner)
+inject = "type"            # "type" (fast, English) | "paste" (robust for Chinese / long text)

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>            <string>freeflow</string>
+    <key>CFBundleDisplayName</key>     <string>freeflow</string>
+    <key>CFBundleIdentifier</key>      <string>com.olivesz.freeflow</string>
+    <key>CFBundleExecutable</key>      <string>Freeflow</string>
+    <key>CFBundleIconFile</key>        <string>freeflow</string>
+    <key>CFBundlePackageType</key>     <string>APPL</string>
+    <key>CFBundleShortVersionString</key> <string>0.1.0</string>
+    <key>CFBundleVersion</key>         <string>1</string>
+    <key>LSMinimumSystemVersion</key>  <string>13.0</string>
+    <!-- Menubar-only agent: no Dock icon, no window. -->
+    <key>LSUIElement</key>             <true/>
+    <!-- Shown in the system permission prompts. Keep them honest & plain. -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>freeflow listens to your voice only while you're dictating, to turn it into text.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>freeflow uses on-device speech recognition to transcribe what you say, privately.</string>
+</dict>
+</plist>
