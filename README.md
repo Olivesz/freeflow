@@ -12,6 +12,8 @@ no account, no cloud, **$0/month**.
 - **English + Simplified Chinese** out of one model.
 - **One config file.** No menubar zoo of features.
 
+<p align="center"><img src="docs/app.png" width="440" alt="The freeflow mac app — shortcut, auto-stop, and launch-at-login settings"></p>
+
 ## Setup
 
 ```bash
