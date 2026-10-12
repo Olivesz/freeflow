@@ -4,12 +4,12 @@
 
 A minimal, **local, free** speech-to-text-anywhere tool — a stripped-down
 alternative to Wispr Flow. Tap a key, talk, and your words are typed into
-whatever app has focus. Everything runs on-device (Whisper via faster-whisper);
+whatever app has focus. Everything runs on-device (Whisper via whisper.cpp);
 no account, no cloud, **$0/month**.
 
 - **Streaming**: words appear as you speak, append-only (never un-typed).
 - **Two trigger modes**: tap-to-toggle (auto-stops on silence) or hold-to-talk.
-- **English + Simplified Chinese** out of one model.
+- **English by default; Simplified Chinese** in the Python app with a multilingual model (see `config.toml`).
 - **One config file.** No menubar zoo of features.
 
 <p align="center"><img src="docs/app.png" width="440" alt="The freeflow mac app — shortcut, auto-stop, and launch-at-login settings"></p>
