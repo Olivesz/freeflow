@@ -67,29 +67,39 @@ public final class WhisperStreamer {
     public func windowStartSample() -> Int { Int(offset * Double(sampleRate)) }
 
     /// One live pass. `window` is the decoder's words over the current window,
-    /// with times relative to the window start. Returns the newly-stable words.
-    public func process(window: [Word]) -> [Word] {
-        let words = agree(words: toWords(window))
-        if lastTime - offset > config.trimAfter {    // bound per-tick cost
-            offset = max(offset, lastTime - config.context)
+    /// with times relative to the window start, and `duration` the window's
+    /// length in seconds when known. Returns the newly-stable words.
+    public func process(window: [Word], duration: Double? = nil) -> [Word] {
+        let words = agree(words: toWords(window, duration))
+        // Bound per-tick cost. Trim from the last committed word's START: its
+        // end is often stretched toward the window end, and cutting there would
+        // cut into words that are not committed yet.
+        if let last = committed.last, lastTime - offset > config.trimAfter {
+            offset = max(offset, last.start - config.context)
         }
         return words
     }
 
     /// Final pass on stop: commit whatever's left in the tail.
-    public func finalize(window: [Word]) -> [Word] {
-        let remaining = stripCommitted(toWords(window))
+    public func finalize(window: [Word], duration: Double? = nil) -> [Word] {
+        let remaining = stripCommitted(toWords(window, duration))
         if let last = remaining.last { lastTime = last.end }
         committed.append(contentsOf: remaining)
         return remaining
     }
 
     // MARK: - internals
-    private func toWords(_ window: [Word]) -> [Word] {
-        window.compactMap { w in
+    /// Non-speech dropped, times made absolute. whisper.cpp occasionally reports
+    /// a word ending far past the audio (30 s in a 2 s window); one such time
+    /// would become the commit point and swallow every later word, so times are
+    /// clamped to the window.
+    private func toWords(_ window: [Word], _ duration: Double?) -> [Word] {
+        let limit = duration ?? .infinity
+        return window.compactMap { w in
             guard !isNonSpeech(w.text) else { return nil }
+            let end = min(max(w.end, 0), limit), start = min(max(w.start, 0), end)
             return Word(text: " " + w.text.trimmingCharacters(in: .whitespaces),
-                        start: w.start + offset, end: w.end + offset)
+                        start: start + offset, end: end + offset)
         }
     }
 
@@ -106,13 +116,22 @@ public final class WhisperStreamer {
         return out
     }
 
-    /// Drop words already committed — by TIME (precise) and by TEXT n-gram
-    /// (catches boundary repeats from whisper.cpp's coarse timestamps).
+    /// Drop the words of this pass that re-hear what is already committed.
+    ///
+    /// whisper.cpp's word times drift by up to a second between passes, and the
+    /// last word of a pass is stretched to the end of the window. So the cut is
+    /// found by TEXT first: the longest run of the last committed words that
+    /// this pass repeats, taking the occurrence nearest in time when the run
+    /// appears twice. Only when the pass repeats none of them does the old
+    /// time rule apply (keep words starting after the last committed end),
+    /// followed by the n-gram check for a boundary repeat.
     private func stripCommitted(_ input: [Word]) -> [Word] {
+        guard !committed.isEmpty, !input.isEmpty else { return input }
+        if let cut = anchor(in: input) { return Array(input[cut...]) }
         var words = input.filter { $0.start > lastTime - 0.1 }
-        if !committed.isEmpty, !words.isEmpty {
-            let tail = committed.suffix(6).map { norm($0.text) }
-            let head = words.prefix(6).map { norm($0.text) }
+        if !words.isEmpty {
+            let tail = committed.suffix(6).map { key($0.text) }
+            let head = words.prefix(6).map { key($0.text) }
             for k in stride(from: min(tail.count, head.count), through: 1, by: -1) {
                 if Array(tail.suffix(k)) == Array(head.prefix(k)) {
                     words = Array(words.dropFirst(k)); break
@@ -120,6 +139,33 @@ public final class WhisperStreamer {
             }
         }
         return words
+    }
+
+    /// Index just past the committed tail's re-hearing in `words`, or nil.
+    private func anchor(in words: [Word]) -> Int? {
+        let tail = committed.suffix(Self.anchorWords).map { key($0.text) }
+        let keys = words.map { key($0.text) }
+        for k in stride(from: tail.count, through: 1, by: -1) {
+            guard keys.count >= k else { continue }
+            let run = Array(tail.suffix(k))
+            let tolerance = k == 1 ? 1.0 : 2.0    // a lone word must sit close in time
+            var best: (cut: Int, dt: Double)?
+            for p in 0...(keys.count - k) where Array(keys[p..<(p + k)]) == run {
+                let dt = abs(words[p + k - 1].end - lastTime)
+                if dt <= tolerance, dt < (best?.dt ?? .infinity) { best = (p + k, dt) }
+            }
+            if let best { return best.cut }
+        }
+        return nil
+    }
+
+    static let anchorWords = 4
+
+    /// Comparison key for matching re-heard words: case and punctuation drop out
+    /// ("you?" re-heard as "you." is the same word).
+    private func key(_ s: String) -> String {
+        s.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) || $0 == "'" }
+            .map(String.init).joined()
     }
 
     private func norm(_ s: String) -> String {

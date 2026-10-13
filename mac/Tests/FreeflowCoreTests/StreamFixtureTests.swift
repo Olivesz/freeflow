@@ -18,6 +18,7 @@ final class StreamFixtureTests: XCTestCase {
             let pending: [String]?
             let offset: Double
             let final: Bool?
+            let duration: Double?
         }
         let config: Config?
         let passes: [Pass]
@@ -42,7 +43,8 @@ final class StreamFixtureTests: XCTestCase {
         let streamer = WhisperStreamer(config: config)
         for (n, p) in fx.passes.enumerated() {
             let words = p.words.map { Word(text: $0[0].text, start: $0[1].time, end: $0[2].time) }
-            let out = p.final == true ? streamer.finalize(window: words) : streamer.process(window: words)
+            let out = p.final == true ? streamer.finalize(window: words, duration: p.duration)
+                                      : streamer.process(window: words, duration: p.duration)
             XCTAssertEqual(out.map(\.text), p.commit, "\(name) pass \(n): commit", file: file, line: line)
             if let pending = p.pending {
                 XCTAssertEqual(streamer.pendingWords.map(\.text), pending, "\(name) pass \(n): pending",
@@ -64,6 +66,8 @@ final class StreamFixtureTests: XCTestCase {
         "first_pass_commits_nothing", "second_agreeing_pass_commits", "disagreeing_pass_commits_nothing",
         "committed_words_are_not_reemitted", "boundary_repeat_is_deduped_by_text", "trimming_bounds_the_window",
         "final_pass_commits_the_tail_once", "nonspeech_tokens_never_commit",
+        "retimed_committed_word_does_not_drop_the_next", "runaway_timestamp_is_clamped",
+        "repeated_word_is_typed_twice",
     ]
 
     func testFirstPassCommitsNothing() throws { try run("first_pass_commits_nothing") }
@@ -74,6 +78,9 @@ final class StreamFixtureTests: XCTestCase {
     func testTrimmingBoundsTheWindow() throws { try run("trimming_bounds_the_window") }
     func testFinalPassCommitsTheTailOnce() throws { try run("final_pass_commits_the_tail_once") }
     func testNonspeechTokensNeverCommit() throws { try run("nonspeech_tokens_never_commit") }
+    func testRetimedCommittedWordDoesNotDropTheNext() throws { try run("retimed_committed_word_does_not_drop_the_next") }
+    func testRunawayTimestampIsClamped() throws { try run("runaway_timestamp_is_clamped") }
+    func testRepeatedWordIsTypedTwice() throws { try run("repeated_word_is_typed_twice") }
 
     func testNonspeechFilter() throws {
         struct Lists: Decodable { let nonspeech: [String]; let speech: [String] }

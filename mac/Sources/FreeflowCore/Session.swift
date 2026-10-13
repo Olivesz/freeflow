@@ -56,7 +56,9 @@ public final class StreamingSession {
         let t0 = Date()
         let words = try await decoder.words(window)
         let ms = Date().timeIntervalSince(t0) * 1000
-        let committed = final ? streamer.finalize(window: words) : streamer.process(window: words)
+        let seconds = Double(window.count) / Double(Audio.sampleRate)
+        let committed = final ? streamer.finalize(window: words, duration: seconds)
+                              : streamer.process(window: words, duration: seconds)
         passes.append(Pass(
             audioEnd: Double(audioEnd) / Double(Audio.sampleRate), windowStart: offset,
             hypothesis: words.map { Word(text: $0.text, start: $0.start + offset, end: $0.end + offset) },

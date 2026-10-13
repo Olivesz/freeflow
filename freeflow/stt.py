@@ -43,6 +43,11 @@ def _norm(word: str) -> str:
     return word.strip().lower()
 
 
+def _key(word: str) -> str:
+    """Matching key for a re-heard word: case and punctuation drop out."""
+    return "".join(c for c in word.lower() if c.isalnum() or c == "'")
+
+
 def _is_nonspeech(text: str) -> bool:
     t = text.strip()
     if not t:
@@ -130,14 +135,22 @@ class HypothesisBuffer:
         self.new: list[Word] = []
         self.last_time = 0.0   # end time of the last committed word
 
+    ANCHOR_WORDS = 4
+
     def insert(self, words: list[Word]) -> None:
-        # 1) ignore anything at/behind what we already committed by TIME (works
-        #    for engines with precise word timestamps, e.g. faster-whisper).
-        words = [w for w in words if w.start > self.last_time - 0.1]
-        # 2) also dedup by TEXT: if the first new words repeat the committed
-        #    tail, drop them. Catches boundary repeats from engines with coarse
-        #    timestamps (e.g. whisper.cpp). Check up to a 6-word overlap.
+        """Keep only the words of this pass that come after the committed text.
+
+        whisper.cpp's word times drift by up to a second between passes, so the
+        cut is found by TEXT first (_anchor). Only when the pass repeats none of
+        the last committed words does the time rule apply, followed by the
+        n-gram check for a boundary repeat. Same rule as WhisperStreamer.swift.
+        """
         if self.committed and words:
+            cut = self._anchor(words)
+            if cut is not None:
+                self.new = words[cut:]
+                return
+            words = [w for w in words if w.start > self.last_time - 0.1]
             tail = [_norm(w.text) for w in self.committed[-6:]]
             head = [_norm(w.text) for w in words[:6]]
             for k in range(min(len(tail), len(head)), 0, -1):
@@ -145,6 +158,28 @@ class HypothesisBuffer:
                     words = words[k:]
                     break
         self.new = words
+
+    def _anchor(self, words: list[Word]) -> int | None:
+        """Index just past this pass's re-hearing of the committed tail.
+
+        Tries the longest run of the last committed words first; when the run
+        appears more than once, takes the occurrence nearest the last commit
+        in time. A lone word has to sit within 1 s of it, a longer run 2 s.
+        """
+        tail = [_key(w.text) for w in self.committed[-self.ANCHOR_WORDS:]]
+        keys = [_key(w.text) for w in words]
+        for k in range(len(tail), 0, -1):
+            run = tail[-k:]
+            tolerance = 1.0 if k == 1 else 2.0
+            best = None
+            for p in range(len(keys) - k + 1):
+                if keys[p:p + k] == run:
+                    dt = abs(words[p + k - 1].end - self.last_time)
+                    if dt <= tolerance and (best is None or dt < best[1]):
+                        best = (p + k, dt)
+            if best is not None:
+                return best[0]
+        return None
 
     def flush(self) -> list[Word]:
         out: list[Word] = []
@@ -180,8 +215,17 @@ class StreamingTranscriber:
     def _window(self, audio: np.ndarray) -> np.ndarray:
         return audio[int(self.offset * SR):]
 
-    def _to_absolute(self, words: list[Word]) -> list[Word]:
-        return [Word(w.text, w.start + self.offset, w.end + self.offset) for w in words]
+    def _to_absolute(self, words: list[Word], duration: float | None = None) -> list[Word]:
+        # whisper.cpp occasionally reports a word ending far past the audio (30 s
+        # in a 2 s window); clamp times to the window so one bad time can't
+        # become the commit point and swallow every later word.
+        limit = float("inf") if duration is None else duration
+        out = []
+        for w in words:
+            end = min(max(w.end, 0.0), limit)
+            start = min(max(w.start, 0.0), end)
+            out.append(Word(w.text, start + self.offset, end + self.offset))
+        return out
 
     def process(self, audio: np.ndarray) -> str:
         """One live pass. Returns only newly-stable text to inject."""
@@ -190,30 +234,30 @@ class StreamingTranscriber:
             return ""
         if self._rms(window) < self.silence_floor:   # dead silence — skip the model entirely
             return ""
-        return "".join(w.text for w in self.commit_window(self.engine.words(window)))
+        return "".join(w.text for w in self.commit_window(self.engine.words(window), window.size / SR))
 
     def flush(self, audio: np.ndarray) -> str:
         """Final pass on stop: trust the whole tail and commit whatever's left."""
         window = self._window(audio)
         if window.size == 0 or self._rms(window) < self.silence_floor:
             return ""
-        return "".join(w.text for w in self.finish_window(self.engine.words(window)))
+        return "".join(w.text for w in self.finish_window(self.engine.words(window), window.size / SR))
 
     # The two methods below are the whole streaming rule, with no audio and no
     # engine: `words` are one pass's output, times relative to the window start.
     # The Swift app's WhisperStreamer implements the same rule, and both run the
     # shared fixtures in tests/fixtures/streams.
 
-    def commit_window(self, words: list[Word]) -> list[Word]:
+    def commit_window(self, words: list[Word], duration: float | None = None) -> list[Word]:
         """One live pass: returns the words that just became stable."""
-        self.buf.insert(self._to_absolute([w for w in words if not _is_nonspeech(w.text)]))
+        self.buf.insert(self._to_absolute([w for w in words if not _is_nonspeech(w.text)], duration))
         committed = self.buf.flush()
         self._maybe_trim()
         return committed
 
-    def finish_window(self, words: list[Word]) -> list[Word]:
+    def finish_window(self, words: list[Word], duration: float | None = None) -> list[Word]:
         """Stop: commit the unconfirmed tail, minus anything already typed."""
-        self.buf.insert(self._to_absolute([w for w in words if not _is_nonspeech(w.text)]))
+        self.buf.insert(self._to_absolute([w for w in words if not _is_nonspeech(w.text)], duration))
         remaining = self.buf.new
         if remaining:
             self.buf.last_time = remaining[-1].end
@@ -222,10 +266,12 @@ class StreamingTranscriber:
 
     def _maybe_trim(self) -> None:
         # Once a lot of already-committed audio sits in the window, drop it —
-        # keep only `context_s` of it so the engine has boundary context. This
-        # bounds per-tick cost no matter how long you talk.
-        if self.buf.last_time - self.offset > self.trim_after_s:
-            self.offset = max(self.offset, self.buf.last_time - self.context_s)
+        # keep `context_s` before the last committed word so the engine has
+        # boundary context. This bounds per-tick cost no matter how long you
+        # talk. Measured from the word's START: its end is often stretched
+        # toward the window end, and cutting there cuts into uncommitted words.
+        if self.buf.committed and self.buf.last_time - self.offset > self.trim_after_s:
+            self.offset = max(self.offset, self.buf.committed[-1].start - self.context_s)
 
 
 def build_transcriber(cfg) -> StreamingTranscriber:

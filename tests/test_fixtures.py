@@ -28,7 +28,8 @@ def test_stream_fixture(path):
     st = StreamingTranscriber(engine=None, trim_after_s=cfg["trim_after_s"], context_s=cfg["context_s"])
     for n, p in enumerate(fx["passes"]):
         words = [Word(t, s, e) for t, s, e in p["words"]]
-        out = st.finish_window(words) if p.get("final") else st.commit_window(words)
+        dur = p.get("duration")
+        out = st.finish_window(words, dur) if p.get("final") else st.commit_window(words, dur)
         assert [w.text for w in out] == p["commit"], f"pass {n}: commit"
         if "pending" in p:
             assert [w.text for w in st.buf.buffer] == p["pending"], f"pass {n}: pending"

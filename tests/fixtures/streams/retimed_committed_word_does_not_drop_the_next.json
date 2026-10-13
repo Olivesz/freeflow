@@ -1,0 +1,38 @@
+{
+  "description": "From the JFK clip: whisper.cpp re-times words between passes. Here 'can' moves to start before the last committed end, which a time cutoff would discard; matching the committed text finds the cut instead.",
+  "passes": [
+    {
+      "words": [
+        [" ask", 0, 0.5],
+        [" what", 0.5, 1.0],
+        [" you", 1.0, 1.5]
+      ],
+      "commit": [],
+      "pending": [" ask", " what", " you"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" ask", 0, 0.5],
+        [" what", 0.5, 1.0],
+        [" you", 1.0, 1.5],
+        [" can", 1.5, 1.8]
+      ],
+      "commit": [" ask", " what", " you"],
+      "pending": [" can"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" ask", 0, 0.4],
+        [" what", 0.4, 0.7],
+        [" you", 0.7, 1.0],
+        [" can", 1.0, 1.3],
+        [" do", 1.3, 1.6]
+      ],
+      "commit": [" can"],
+      "pending": [" do"],
+      "offset": 0.0
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "description": "A word said twice ('very very') is speech, not a boundary repeat: the second one must still be typed.",
+  "passes": [
+    {
+      "words": [
+        [" it", 0, 0.3],
+        [" is", 0.3, 0.6],
+        [" very", 0.6, 0.9]
+      ],
+      "commit": [],
+      "pending": [" it", " is", " very"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" it", 0, 0.3],
+        [" is", 0.3, 0.6],
+        [" very", 0.6, 0.9],
+        [" very", 0.9, 1.2]
+      ],
+      "commit": [" it", " is", " very"],
+      "pending": [" very"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" it", 0, 0.3],
+        [" is", 0.3, 0.6],
+        [" very", 0.6, 0.9],
+        [" very", 0.9, 1.2],
+        [" good", 1.2, 1.5]
+      ],
+      "commit": [" very"],
+      "pending": [" good"],
+      "offset": 0.0
+    }
+  ]
+}

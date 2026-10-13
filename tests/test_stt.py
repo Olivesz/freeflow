@@ -39,7 +39,7 @@ def test_dead_silence_and_tiny_windows_never_reach_the_engine():
 
 def test_streaming_output_is_append_only_and_trims_the_window():
     five = [(f" w{i}", i * 2.0, i * 2.0 + 2.0) for i in range(5)]  # 10 s of speech
-    eng = ScriptedEngine([five, five, [(" w4", 0.0, 2.0)]])
+    eng = ScriptedEngine([five, five, [(" w4", 2.0, 4.0)]])
     st = StreamingTranscriber(eng, trim_after_s=8.0, context_s=2.0)
     audio = speechlike(12.0)
 
@@ -50,9 +50,9 @@ def test_streaming_output_is_append_only_and_trims_the_window():
     assert out1 == ""
     assert out2 == " w0 w1 w2 w3 w4"
     assert out3 == ""
-    # After committing through t=10 s the window is trimmed to context_s of
-    # committed audio: engine 3 saw only the last 4 s, not all 12.
-    assert eng.received[2] == 4 * SR
+    # w4 is the last committed word and starts at 8 s, so the window now starts
+    # context_s before it: engine 3 saw only the last 6 s, not all 12.
+    assert eng.received[2] == 6 * SR
 
 
 def test_final_flush_commits_the_unconfirmed_tail_once():
