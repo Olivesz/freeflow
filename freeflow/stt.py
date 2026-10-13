@@ -196,7 +196,8 @@ class HypothesisBuffer:
 
 # ─────────────────────── the streaming driver ─────────────────────── #
 class StreamingTranscriber:
-    def __init__(self, engine, trim_after_s: float = 8.0, context_s: float = 2.0,
+    # Same window as the mac app (WhisperStreamer.Config.shipped).
+    def __init__(self, engine, trim_after_s: float = 3.0, context_s: float = 1.5,
                  silence_floor: float = 0.005):
         self.engine = engine
         self.trim_after_s = trim_after_s   # trim once this much committed audio piles up

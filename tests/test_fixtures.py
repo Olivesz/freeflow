@@ -16,9 +16,14 @@ FIXTURES = Path(__file__).parent / "fixtures"
 STREAMS = sorted((FIXTURES / "streams").glob("*.json"))
 NONSPEECH = json.loads((FIXTURES / "nonspeech.json").read_text())
 
-# The mac app's window (WhisperStreamer.Config.shipped); fixtures without a
-# "config" block run with it.
-SHIPPED = {"trim_after_s": 3.0, "context_s": 1.5}
+# The shipped window (tests/fixtures/window.json). The mac app's
+# WhisperStreamer.Config.shipped is checked against the same file.
+SHIPPED = json.loads((FIXTURES / "window.json").read_text())
+
+
+def test_python_default_window_is_the_apps():
+    st = StreamingTranscriber(engine=None)
+    assert (st.trim_after_s, st.context_s) == (SHIPPED["trim_after_s"], SHIPPED["context_s"])
 
 
 @pytest.mark.parametrize("path", STREAMS, ids=[p.stem for p in STREAMS])

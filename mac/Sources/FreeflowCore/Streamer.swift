@@ -37,10 +37,10 @@ public final class WhisperStreamer {
             self.trimAfter = trimAfter; self.context = context
         }
 
-        // Keep the transcription window SMALL. Large windows both slow whisper.cpp
-        // down (falling behind real-time) and make its greedy decoder skip phrases —
-        // which buffer-trimming then makes permanent. Trimming aggressively to a
-        // short window is faster AND drops far less. (was 8.0 / 2.0 → caused ~2s skips.)
+        // Chosen on the benchmark's dev split (bench/README.md): with the
+        // text-anchored cut, 3.0 / 1.5 gave the lowest streamed WER of the
+        // windows tried (4.9%, against 5.3-6.0% for 5/2, 8/2 and no trimming).
+        // Before that fix every window lost words: 13.8-15.8% on the same clips.
         public static let shipped = Config(trimAfter: 3.0, context: 1.5)
     }
 

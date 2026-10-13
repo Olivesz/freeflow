@@ -82,6 +82,14 @@ final class StreamFixtureTests: XCTestCase {
     func testRunawayTimestampIsClamped() throws { try run("runaway_timestamp_is_clamped") }
     func testRepeatedWordIsTypedTwice() throws { try run("repeated_word_is_typed_twice") }
 
+    /// The shipped window is pinned in tests/fixtures/window.json; the Python
+    /// reference's default is checked against the same file.
+    func testShippedWindowMatchesTheSharedFixture() throws {
+        struct Window: Decodable { let trim_after_s: Double; let context_s: Double }
+        let w = try JSONDecoder().decode(Window.self, from: Data(contentsOf: Self.fixtures.appendingPathComponent("window.json")))
+        XCTAssertEqual(WhisperStreamer.Config.shipped, WhisperStreamer.Config(trimAfter: w.trim_after_s, context: w.context_s))
+    }
+
     func testNonspeechFilter() throws {
         struct Lists: Decodable { let nonspeech: [String]; let speech: [String] }
         let l = try JSONDecoder().decode(Lists.self, from: Data(contentsOf: Self.fixtures.appendingPathComponent("nonspeech.json")))

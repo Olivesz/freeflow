@@ -1,0 +1,5 @@
+{
+  "description": "The shipped streaming window. Both implementations must default to it; fixtures without a config block run with it.",
+  "trim_after_s": 3.0,
+  "context_s": 1.5
+}
