@@ -5,8 +5,8 @@
 The rule was fixed before any results were looked at: for each of the 40
 test-clean speakers, in speaker-ID order, take the first utterance (by ID) that
 lasts between 4 and 20 seconds. The first 20 speakers are the dev split, used
-while fixing the streamer; the last 20 are held out and were only scored after
-the fix was chosen.
+while fixing the streamer and choosing its window; the last 20 are held out
+and were first scored after the fix was committed.
 
 CI's real-model gate replays a fixed subset: JFK plus every fifth speaker
 (the first, sixth, eleventh, ...), marked "gate" in the manifest.

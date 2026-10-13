@@ -1,0 +1,15 @@
+{
+  "clips" : 41,
+  "context_s" : 2,
+  "coreml_encoder" : true,
+  "cores" : 10,
+  "decoding" : "greedy",
+  "load_average_end" : 18.640999999999998,
+  "load_average_start" : 21.405000000000001,
+  "machine" : "Mac17,4, Apple M5",
+  "macos" : "Version 26.6.2 (Build 25G83)",
+  "model" : "ggml-base.en.bin",
+  "model_sha256" : "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+  "tick_ms" : 350,
+  "trim_after_s" : 5
+}
