@@ -190,22 +190,35 @@ class StreamingTranscriber:
             return ""
         if self._rms(window) < self.silence_floor:   # dead silence — skip the model entirely
             return ""
-        self.buf.insert(self._to_absolute(self.engine.words(window)))
-        committed = self.buf.flush()
-        self._maybe_trim()
-        return "".join(w.text for w in committed)
+        return "".join(w.text for w in self.commit_window(self.engine.words(window)))
 
     def flush(self, audio: np.ndarray) -> str:
         """Final pass on stop: trust the whole tail and commit whatever's left."""
         window = self._window(audio)
         if window.size == 0 or self._rms(window) < self.silence_floor:
             return ""
-        words = self._to_absolute(self.engine.words(window))
-        remaining = [w for w in words if w.start > self.buf.last_time - 0.1]
+        return "".join(w.text for w in self.finish_window(self.engine.words(window)))
+
+    # The two methods below are the whole streaming rule, with no audio and no
+    # engine: `words` are one pass's output, times relative to the window start.
+    # The Swift app's WhisperStreamer implements the same rule, and both run the
+    # shared fixtures in tests/fixtures/streams.
+
+    def commit_window(self, words: list[Word]) -> list[Word]:
+        """One live pass: returns the words that just became stable."""
+        self.buf.insert(self._to_absolute([w for w in words if not _is_nonspeech(w.text)]))
+        committed = self.buf.flush()
+        self._maybe_trim()
+        return committed
+
+    def finish_window(self, words: list[Word]) -> list[Word]:
+        """Stop: commit the unconfirmed tail, minus anything already typed."""
+        self.buf.insert(self._to_absolute([w for w in words if not _is_nonspeech(w.text)]))
+        remaining = self.buf.new
         if remaining:
             self.buf.last_time = remaining[-1].end
             self.buf.committed.extend(remaining)
-        return "".join(w.text for w in remaining)
+        return remaining
 
     def _maybe_trim(self) -> None:
         # Once a lot of already-committed audio sits in the window, drop it —

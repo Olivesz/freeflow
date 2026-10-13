@@ -1,0 +1,21 @@
+{
+  "description": "A revised word is not typed until two passes agree on it.",
+  "passes": [
+    {
+      "words": [
+        [" hell", 0, 0.5]
+      ],
+      "commit": [],
+      "pending": [" hell"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" hello", 0, 0.5]
+      ],
+      "commit": [],
+      "pending": [" hello"],
+      "offset": 0.0
+    }
+  ]
+}

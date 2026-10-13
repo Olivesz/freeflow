@@ -1,0 +1,25 @@
+{
+  "description": "Sound-event annotations and bare punctuation are dropped before agreement.",
+  "passes": [
+    {
+      "words": [
+        [" [BLANK_AUDIO]", 0, 0.4],
+        [" hi", 0.4, 0.8],
+        [" .", 0.8, 0.9]
+      ],
+      "commit": [],
+      "pending": [" hi"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" (music)", 0, 0.4],
+        [" hi", 0.4, 0.8],
+        [" ♪", 0.8, 0.9]
+      ],
+      "commit": [" hi"],
+      "pending": [],
+      "offset": 0.0
+    }
+  ]
+}

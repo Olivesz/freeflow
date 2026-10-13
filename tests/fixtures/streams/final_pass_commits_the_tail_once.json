@@ -1,0 +1,30 @@
+{
+  "description": "Stop trusts the unconfirmed tail but never retypes a committed word.",
+  "passes": [
+    {
+      "words": [
+        [" hello", 0, 0.5]
+      ],
+      "commit": [],
+      "pending": [" hello"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" hello", 0, 0.5]
+      ],
+      "commit": [" hello"],
+      "pending": [],
+      "offset": 0.0
+    },
+    {
+      "final": true,
+      "words": [
+        [" hello", 0, 0.5],
+        [" bye", 0.5, 1.0]
+      ],
+      "commit": [" bye"],
+      "offset": 0.0
+    }
+  ]
+}

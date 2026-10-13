@@ -1,0 +1,32 @@
+{
+  "description": "whisper.cpp times are coarse: a committed word can come back slightly later. The text-tail dedup must drop it.",
+  "passes": [
+    {
+      "words": [
+        [" hello", 0, 0.5],
+        [" world", 0.5, 1.0]
+      ],
+      "commit": [],
+      "pending": [" hello", " world"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" hello", 0, 0.5],
+        [" world", 0.5, 1.0]
+      ],
+      "commit": [" hello", " world"],
+      "pending": [],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" world", 0.95, 1.4],
+        [" again", 1.4, 1.8]
+      ],
+      "commit": [],
+      "pending": [" again"],
+      "offset": 0.0
+    }
+  ]
+}

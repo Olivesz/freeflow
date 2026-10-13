@@ -1,0 +1,22 @@
+{
+  "description": "The agreed prefix commits; the new tail waits for the next pass.",
+  "passes": [
+    {
+      "words": [
+        [" hello", 0, 0.5]
+      ],
+      "commit": [],
+      "pending": [" hello"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" hello", 0, 0.5],
+        [" world", 0.5, 1.0]
+      ],
+      "commit": [" hello"],
+      "pending": [" world"],
+      "offset": 0.0
+    }
+  ]
+}

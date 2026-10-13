@@ -1,0 +1,39 @@
+{
+  "description": "A committed word heard again at the same time is not typed twice.",
+  "passes": [
+    {
+      "words": [
+        [" hello", 0, 0.5]
+      ],
+      "commit": [],
+      "pending": [" hello"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" hello", 0, 0.5]
+      ],
+      "commit": [" hello"],
+      "pending": [],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" hello", 0, 0.5],
+        [" world", 0.5, 1.0]
+      ],
+      "commit": [],
+      "pending": [" world"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" hello", 0, 0.5],
+        [" world", 0.5, 1.0]
+      ],
+      "commit": [" world"],
+      "pending": [],
+      "offset": 0.0
+    }
+  ]
+}

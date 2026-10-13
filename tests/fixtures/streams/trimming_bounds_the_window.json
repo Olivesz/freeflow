@@ -1,0 +1,41 @@
+{
+  "description": "Once more than trim_after_s of committed audio piles up, the window starts context_s before the last committed word, and a re-hearing of that word is not typed again.",
+  "config": {
+    "trim_after_s": 8.0,
+    "context_s": 2.0
+  },
+  "passes": [
+    {
+      "words": [
+        [" w0", 0.0, 2.0],
+        [" w1", 2.0, 4.0],
+        [" w2", 4.0, 6.0],
+        [" w3", 6.0, 8.0],
+        [" w4", 8.0, 10.0]
+      ],
+      "commit": [],
+      "pending": [" w0", " w1", " w2", " w3", " w4"],
+      "offset": 0.0
+    },
+    {
+      "words": [
+        [" w0", 0.0, 2.0],
+        [" w1", 2.0, 4.0],
+        [" w2", 4.0, 6.0],
+        [" w3", 6.0, 8.0],
+        [" w4", 8.0, 10.0]
+      ],
+      "commit": [" w0", " w1", " w2", " w3", " w4"],
+      "pending": [],
+      "offset": 8.0
+    },
+    {
+      "words": [
+        [" w4", 0.0, 2.0]
+      ],
+      "commit": [],
+      "pending": [],
+      "offset": 8.0
+    }
+  ]
+}

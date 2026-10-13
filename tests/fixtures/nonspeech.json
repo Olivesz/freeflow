@@ -1,0 +1,5 @@
+{
+  "description": "Decoder tokens that are never dictation, and real words that must pass.",
+  "nonspeech": ["[BLANK_AUDIO]", "(water splashing)", "♪ music ♪", ".", "", "  ", "*sigh*"],
+  "speech": [" hello", "world.", "你好", "I'm", " 7pm"]
+}
