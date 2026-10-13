@@ -98,9 +98,9 @@ It did not crash on these 41 clips; it is here for comparison.
 | run | window | tick | decoder | held-out: streamed / offline WER | dropped | dev: streamed / offline WER | dropped | all 41 clips: streamed / offline | commit lag p50 / p95 | CPU s per audio s |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `80ec19e/matrix-greedy-3.0-1.5` | 3 / 1.5 s | 350 ms | greedy | 6.7% / 5.4% | 3 of 523 | 4.9% / 3.5% | 2 of 513 | 5.8% / 4.4% | 1118 / 2231 ms | 4.72 |
-| `80ec19e/trim-5.0-2.0` | 5 / 2 s | 350 ms | greedy | 6.3% / 5.4% | 7 of 523 | 6.0% / 3.5% | 10 of 513 | 6.2% / 4.4% | 1029 / 2266 ms | 4.20 |
+| `80ec19e/trim-5.0-2.0` | 5 / 2 s | 350 ms | greedy | 6.3% / 5.4% | 7 of 523 | 6.0% / 3.5% | 10 of 513 | 6.2% / 4.4% | 1028 / 2266 ms | 4.20 |
 | `80ec19e/trim-8.0-2.0` | 8 / 2 s | 350 ms | greedy | 7.8% / 5.4% | 6 of 523 | 5.5% / 3.5% | 8 of 513 | 6.7% / 4.4% | 965 / 2116 ms | 3.47 |
-| `80ec19e/trim-none` | none | 350 ms | greedy | 6.5% / 5.4% | 7 of 523 | 5.3% / 3.5% | 8 of 513 | 5.9% / 4.4% | 907 / 1775 ms | 3.02 |
+| `80ec19e/trim-none` | none | 350 ms | greedy | 6.5% / 5.4% | 7 of 523 | 5.3% / 3.5% | 8 of 513 | 5.9% / 4.4% | 906 / 1775 ms | 3.02 |
 | `80ec19e/beam` | 3 / 1.5 s | 350 ms | beam | 7.8% / 5.0% | 3 of 523 | 6.0% / 3.1% | 1 of 513 | 6.9% / 4.1% | 928 / 1651 ms | 3.19 |
 | `80ec19e/beam-8.0-2.0` | 8 / 2 s | 350 ms | beam | 6.5% / 5.0% | 4 of 523 | 6.0% / 3.1% | 7 of 513 | 6.3% / 4.1% | 940 / 1818 ms | 3.26 |
 
@@ -119,10 +119,10 @@ identical to `80ec19e` and to `9832030/shipped`, which ran at load 8.
 | run | window | tick | decoder | held-out: streamed / offline WER | dropped | dev: streamed / offline WER | dropped | all 41 clips: streamed / offline | commit lag p50 / p95 | CPU s per audio s |
 |---|---|---|---|---|---|---|---|---|---|---|
 | `9832030/timing` | 3 / 1.5 s | 350 ms | greedy | 6.7% / 5.4% | 3 of 523 | 4.9% / 3.5% | 2 of 513 | 5.8% / 4.4% | 787 / 1557 ms | 1.65 |
-| `9832030/tick-600` | 3 / 1.5 s | 600 ms | greedy | 6.7% / 5.4% | 8 of 523 | 5.5% / 3.5% | 2 of 513 | 6.1% / 4.4% | 1186 / 2119 ms | 1.15 |
+| `9832030/tick-600` | 3 / 1.5 s | 600 ms | greedy | 6.7% / 5.4% | 8 of 523 | 5.5% / 3.5% | 2 of 513 | 6.1% / 4.4% | 1184 / 2119 ms | 1.15 |
 
 - **Commit lag** is how long after a word ends it is typed: a median of
-  0.79 s at the app's 350 ms tick against 1.19 s at the Python app's old
+  0.79 s at the app's 350 ms tick against 1.18 s at the Python app's old
   600 ms tick. A word needs two agreeing passes, so the tick sets most of it.
 - **Decode** takes 165 ms per pass at the median and 353 ms at p95
   (`summary.csv`, ALL row), so at a 350 ms tick the decoder keeps up with
