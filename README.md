@@ -2,117 +2,122 @@
 
 [![CI](https://github.com/Olivesz/freeflow/actions/workflows/ci.yml/badge.svg)](https://github.com/Olivesz/freeflow/actions/workflows/ci.yml)
 
-A minimal, **local, free** speech-to-text-anywhere tool — a stripped-down
-alternative to Wispr Flow. Tap a key, talk, and your words are typed into
-whatever app has focus. Everything runs on-device (Whisper via whisper.cpp);
-no account, no cloud, **$0/month**.
+Local dictation for macOS. Press a shortcut, talk, and the words are typed into
+whatever app has focus as you speak. Whisper runs on-device through
+whisper.cpp: no account, no cloud, nothing to pay.
 
-- **Streaming**: words appear as you speak, append-only (never un-typed).
-- **Two trigger modes**: tap-to-toggle (auto-stops on silence) or hold-to-talk.
-- **English by default; Simplified Chinese** in the Python app with a multilingual model (see `config.toml`).
-- **One config file.** No menubar zoo of features.
+Words are typed while you're still talking, and a typed word is never taken
+back. Here is the shipped streamer replaying the JFK sample at the app's
+350 ms tick ([`bench/ticks.py`](bench/ticks.py) on
+[its pass log](bench/results/9832030/timing/logs/jfk.jsonl)):
 
-<p align="center"><img src="docs/app.png" width="440" alt="The freeflow mac app — shortcut, auto-stop, and launch-at-login settings"></p>
-
-## Setup
-
-```bash
-cd freeflow
-python3.12 -m venv .venv            # already created if you ran the installer
-.venv/bin/pip install -r requirements.txt
+```
+jfk: 11 s, tick 350 ms, window 3/1.5 s, greedy
+   1.75s  + And
+   2.10s  + so my fellow
+   2.45s  + Americans.
+   4.20s  + ask
+   4.55s  + not
+   7.35s  + what your country can do for you.
+   9.45s  + ask what
+   9.80s  + you can
+  10.15s  + do for
+  10.50s  + your country.
+streamed: And so my fellow Americans. ask not what your country can do for you. ask what you can do for your country.
+offline:  And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.
 ```
 
-### Grant macOS permissions (one time)
+## Install
 
-freeflow needs three permissions for the terminal app you launch it from
-(Terminal, iTerm, VS Code, …). Add that app under **System Settings → Privacy
-& Security →**:
-
-| Permission | Why | 
-|---|---|
-| **Microphone** | capture your voice (prompts automatically on first run) |
-| **Input Monitoring** | hear the global trigger key |
-| **Accessibility** | type transcribed text into other apps |
-
-> After adding to Accessibility/Input Monitoring you must **fully quit and
-> reopen** the terminal app for it to take effect.
-
-## Use
+Needs macOS 14 and Xcode's command-line tools.
 
 ```bash
-# Validate mic + model with NO accessibility needed (records 4s, prints text):
-.venv/bin/python -m freeflow check
-
-# See your audio input devices:
-.venv/bin/python -m freeflow devices
-
-# Run the dictation daemon:
-.venv/bin/python -m freeflow
+git clone https://github.com/Olivesz/freeflow.git
+cd freeflow/mac
+./build_app.sh        # builds, downloads the model (sha256-checked), bundles it
+open freeflow.app
 ```
 
-Default trigger is **Right ⌘**. Tap it, talk, stop talking → text lands in the
-focused field. Tap again to stop early. Change everything in `config.toml`.
+The first launch walks through the two permissions: Microphone, and
+Accessibility so it can type into other apps. The default shortcut is ⌥Space;
+tap to start, and it stops after 1.5 s of silence (both changeable). Run
+`./setup-signing.sh` once if you rebuild often: a stable signing identity keeps
+the Accessibility grant across rebuilds.
 
-## Configuring (`config.toml`)
+## Does streaming cost accuracy?
 
-Edit it like a keybind file. Highlights:
+Streaming re-decodes a short window every 350 ms, so it hears less context than
+decoding the whole recording at once. The benchmark in [`bench/`](bench/)
+replays 41 public clips (JFK plus 40 LibriSpeech test-clean speakers) through
+the app's own streamer and scores both against the reference, on the same
+model:
 
-- `model.engine` — **`whisper.cpp`** (default): runs on Metal / the Neural
-  Engine — fastest and coolest on Apple Silicon. `faster-whisper`: CPU backend,
-  the simplest fallback.
-- `model.name` — `base.en` (default) is fast and accurate for English. For
-  tougher audio use `small` / `medium` / `large-v3` (slower, more accurate).
-- `model.language` — `"en"`, `"zh"`, or `"auto"`. **For Chinese**, use a
-  multilingual model (`small`+) with `language = "zh"` — `.en` models are
-  English-only.
-- `trigger.mode` — `"toggle"` or `"hold"`. `trigger.key` — e.g. `cmd_r`,
-  `alt_r`, `f13`.
-- `vad.silence_ms` / `stream.tick_ms` — the two latency knobs. Lower = snappier
-  and streams sooner, at more CPU and slightly more risk of an early cut-off.
-- `stream.inject` — `"type"` (default) or `"paste"`. **Use `"paste"` for
-  Chinese**, emoji, or very long dictation.
+Held-out split, 20 LibriSpeech speakers, 523 words:
 
-### Speed vs. accuracy, at a glance
+| streamer | streamed WER | offline WER | words dropped |
+|---|---|---|---|
+| [`0f70dcd`](bench/results/0f70dcd/shipped/summary.csv) | 19.7% | 5.4% | 78 of 523 |
+| [`9832030`](bench/results/9832030/timing/summary.csv) | 6.7% | 5.4% | 3 of 523 |
 
-| Want | Set |
-|---|---|
-| Fastest English (default) | `engine="whisper.cpp"`, `name="base.en"` |
-| More accurate English | `name="small.en"` or `"medium.en"` |
-| Simplified Chinese | `name="small"` (or bigger), `language="zh"`, `inject="paste"` |
-| No native deps / pure-Python | `engine="faster-whisper"` |
+The first row is the streamer before
+[`262c910`](https://github.com/Olivesz/freeflow/commit/262c910): it dropped about
+one word in seven that offline decoding of the same audio got right, because it
+trusted whisper.cpp's word timestamps, which drift by up to a second between
+passes. The fix finds the boundary between typed and new words by matching
+text. It was built, and the window chosen, on the other 20 speakers and JFK;
+the held-out speakers were first scored after the fix was committed. Per-clip
+numbers, every pass of every clip, and the commands to reproduce them are in
+[`bench/`](bench/).
 
 ## How it works
 
 ```
-[hotkey] → [mic 16kHz] → ┬→ [VAD: still talking?] ─────────── auto-stop
-                         └→ [engine every 350ms] → [stabilize] → [type into app]
-                              (trimmed window)       (LocalAgreement)
+shortcut → mic (16 kHz) → every 350 ms: whisper.cpp over a trimmed window
+         → keep words two passes agree on → fillers, commands, vocabulary → keystrokes
 ```
 
-Three ideas do the heavy lifting, all in `freeflow/stt.py`:
+- **Append-only.** A word is typed once two consecutive passes agree on it.
+- **Bounded window.** Once enough audio is committed, the window restarts just
+  before the last committed word, so each pass costs the same however long you
+  talk.
+- **Voice commands.** "New line", "new paragraph" and "scratch that" fire only
+  when said on their own; "scratch that" can only erase what the current
+  dictation typed.
+- **Greedy decoding.** Beam search crashed whisper.cpp mid-dictation (SIGTRAP),
+  so it is off, and a test fails if it comes back.
 
-1. **Append-only streaming** — Whisper revises earlier words as it hears more,
-   so freeflow only types a word once *two passes agree* on it (LocalAgreement).
-   Text already typed is never taken back.
-2. **Buffer trimming** — instead of re-transcribing the whole utterance every
-   tick (which slows down as you talk), it drops already-committed audio and
-   keeps a couple seconds of context. Cost stays flat no matter how long you go.
-3. **Pluggable engines** — both backends emit the same `Word` objects, so the
-   whole model swaps via one config line (`model.engine`). End-of-speech
-   detection lives in `freeflow/vad.py`.
+[`ARCHITECTURE.md`](ARCHITECTURE.md) has the details.
 
 ## Tests
 
-The streaming core is deliberately model-free and deterministic, so it's tested
-without a mic, a model download, or any macOS permission:
-
 ```bash
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest -q
+cd mac && swift test                   # FreeflowCore: streaming, text processing, scoring
+.venv/bin/python -m pytest -q          # the Python reference
 ```
 
-Covers config merging, end-of-utterance timing (grace period, silence clock,
-mid-sentence pauses), Whisper non-speech-hallucination filtering, LocalAgreement
-commit semantics, and the append-only + window-trimming properties of the
-streaming driver — including the coarse-timestamp boundary-repeat case that
-whisper.cpp produces after a trim.
+Both suites run the same fixtures in `tests/fixtures/streams`, each one a
+sequence of decoder passes and the words that must be typed after each; two
+are taken from real pass logs. CI runs both, builds the release app, and
+replays the benchmark's gate clips through it with the real model: it fails if
+streaming WER exceeds offline WER by more than 2 points, and a control run with
+a broken window has to fail too.
+
+## Python reference implementation
+
+`freeflow/` is the first version: the same pipeline as a terminal app, with a
+choice of whisper.cpp or faster-whisper and Simplified Chinese support through
+a multilingual model.
+
+```bash
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m freeflow check     # record 4 s and print the text, no permissions needed
+.venv/bin/python -m freeflow           # run it; Right ⌘ toggles dictation
+```
+
+The terminal app you launch it from needs Microphone, Input Monitoring and
+Accessibility. Settings are in `config.toml`: engine, model, language, trigger
+key and mode, silence timeout, and typing versus pasting (paste for Chinese).
+
+## License
+
+MIT
