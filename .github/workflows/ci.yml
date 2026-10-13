@@ -20,7 +20,7 @@ jobs:
 
   swift:
     runs-on: macos-14
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Build the app (release)
@@ -30,31 +30,48 @@ jobs:
         working-directory: mac
         run: swift test
 
-      # The real-model gate: replay the gate clips through the shipped streamer
-      # with whisper.cpp base.en and fail if streaming loses accuracy against
-      # offline decoding of the same clips (bench/gate.py).
+  # The real-model gate: replay the gate clips through the shipped streamer
+  # with whisper.cpp base.en and fail if streaming loses accuracy against
+  # offline decoding of the same clips (bench/gate.py). The control job runs
+  # the same gate with a 0.5 s window, which must fail, or the gate is not
+  # measuring anything. The three jobs run in parallel.
+  gate:
+    runs-on: macos-14
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - run: ci-gate
+            args: ""
+            expect: pass
+          - run: ci-control
+            args: "--trim 0.5/0.2"
+            expect: fail
+    name: gate (${{ matrix.run }})
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
           path: mac/Resources/ggml-base.en.bin
           key: ggml-base.en-a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
       - name: Fetch the model
         run: mac/fetch_model.sh --no-encoder
-      - name: Real-model streaming gate
+      - name: Replay the gate clips
         env:
           GATE: "1"
           FREEFLOW_NO_ENCODER: "1"
-        run: |
-          bench/run.sh ci-gate
-          python3 bench/gate.py bench/results/$(git rev-parse --short HEAD)/ci-gate/summary.csv
-      # Negative control: the same gate with a 0.5 s window must fail, or the
-      # gate is not measuring anything.
-      - name: Gate control (a broken window must fail)
+          RUN: ${{ matrix.run }}
+          ARGS: ${{ matrix.args }}
+        run: bench/run.sh "$RUN" $ARGS
+      - name: Check the result
         env:
-          GATE: "1"
-          FREEFLOW_NO_ENCODER: "1"
+          RUN: ${{ matrix.run }}
+          EXPECT: ${{ matrix.expect }}
         run: |
-          bench/run.sh ci-control --trim 0.5/0.2
-          if python3 bench/gate.py bench/results/$(git rev-parse --short HEAD)/ci-control/summary.csv; then
-            echo "the gate passed a 0.5/0.2 window; it cannot catch a regression" >&2
+          summary="bench/results/$(git rev-parse --short HEAD)/$RUN/summary.csv"
+          if python3 bench/gate.py "$summary"; then result=pass; else result=fail; fi
+          if [ "$result" != "$EXPECT" ]; then
+            echo "expected the gate to $EXPECT on $RUN, but it did $result" >&2
             exit 1
           fi
