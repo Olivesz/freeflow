@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  python:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,3 +17,44 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
+
+  swift:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app (release)
+        working-directory: mac
+        run: swift build -c release
+      - name: Unit tests
+        working-directory: mac
+        run: swift test
+
+      # The real-model gate: replay the gate clips through the shipped streamer
+      # with whisper.cpp base.en and fail if streaming loses accuracy against
+      # offline decoding of the same clips (bench/gate.py).
+      - uses: actions/cache@v4
+        with:
+          path: mac/Resources/ggml-base.en.bin
+          key: ggml-base.en-a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
+      - name: Fetch the model
+        run: mac/fetch_model.sh --no-encoder
+      - name: Real-model streaming gate
+        env:
+          GATE: "1"
+          FREEFLOW_NO_ENCODER: "1"
+        run: |
+          bench/run.sh ci-gate
+          python3 bench/gate.py bench/results/$(git rev-parse --short HEAD)/ci-gate/summary.csv
+      # Negative control: the same gate with a 0.5 s window must fail, or the
+      # gate is not measuring anything.
+      - name: Gate control (a broken window must fail)
+        env:
+          GATE: "1"
+          FREEFLOW_NO_ENCODER: "1"
+        run: |
+          bench/run.sh ci-control --trim 0.5/0.2
+          if python3 bench/gate.py bench/results/$(git rev-parse --short HEAD)/ci-control/summary.csv; then
+            echo "the gate passed a 0.5/0.2 window; it cannot catch a regression" >&2
+            exit 1
+          fi
