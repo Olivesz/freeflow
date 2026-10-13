@@ -10,7 +10,7 @@ let package = Package(
     ],
     dependencies: [
         // whisper.cpp wrapped for Swift; builds with Accelerate/Metal on Apple Silicon.
-        .package(url: "https://github.com/exPHAT/SwiftWhisper.git", branch: "master")
+        .package(url: "https://github.com/exPHAT/SwiftWhisper.git", revision: "c340197966ebd264f3135d3955874b40f8ed58bc")
     ],
     targets: [
         // Streaming, text processing and endpointing: pure Swift, no model, no UI.

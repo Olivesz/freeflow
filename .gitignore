@@ -14,7 +14,9 @@ ios/build/
 xcuserdata/
 
 # Speech models: Python engines download into the HF cache on first run;
-# the CoreML encoder is compiled by mac/build_app.sh.
+# mac/fetch_model.sh downloads the mac app's model and Core ML encoder.
 *.mlmodelc/
 *.ggml
 ggml-*.bin
+*.part
+mac/Resources/ggml-base.en-encoder.sha256

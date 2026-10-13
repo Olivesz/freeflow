@@ -6,6 +6,10 @@ if let i = CommandLine.arguments.firstIndex(of: "--selftest"),
     SelfTest.run(CommandLine.arguments[i + 1])   // never returns
 }
 
+if CommandLine.arguments.contains("--bench") {
+    Bench.run()   // never returns
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--selftest-proc"),
    i + 1 < CommandLine.arguments.count {
     SelfTest.runProc(CommandLine.arguments[i + 1])   // never returns

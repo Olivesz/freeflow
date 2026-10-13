@@ -3,10 +3,15 @@ import Foundation
 import FreeflowCore
 import SwiftWhisper
 
-/// Locates the whisper model: bundled in the app first, else the copy that the
-/// Python prototype already downloaded (handy during development).
+/// Locates the whisper model: $FREEFLOW_MODEL_DIR (set by bench/run.sh), then
+/// the app bundle, else the copy the Python prototype already downloaded.
+/// whisper.cpp picks up the Core ML encoder from the same directory.
 enum ModelLocator {
     static func baseEN() -> URL? {
+        if let dir = ProcessInfo.processInfo.environment["FREEFLOW_MODEL_DIR"] {
+            let u = URL(fileURLWithPath: dir).appendingPathComponent("ggml-base.en.bin")
+            return FileManager.default.fileExists(atPath: u.path) ? u : nil
+        }
         if let u = Bundle.main.url(forResource: "ggml-base.en", withExtension: "bin") { return u }
         let home = FileManager.default.homeDirectoryForCurrentUser
         let p = home.appendingPathComponent(
@@ -157,8 +162,15 @@ enum WhisperSetup {
 }
 
 extension Whisper: WordDecoder {
+    /// SwiftWhisper resumes the caller before it clears its busy flag, so a pass
+    /// started right after the previous one returns can fail with instanceBusy.
+    /// Wait out that gap instead of losing the pass.
     public func words(_ frames: [Float]) async throws -> [Word] {
-        try await transcribe(audioFrames: frames).words
+        for _ in 0..<200 {
+            do { return try await transcribe(audioFrames: frames).words }
+            catch WhisperError.instanceBusy { try await Task.sleep(nanoseconds: 1_000_000) }
+        }
+        return try await transcribe(audioFrames: frames).words
     }
 }
 
