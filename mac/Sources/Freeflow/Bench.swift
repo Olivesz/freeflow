@@ -2,10 +2,10 @@ import Foundation
 import FreeflowCore
 import SwiftWhisper
 
-/// Hidden mode: `Freeflow --bench <manifest.json> --out <dir> [--trim A/B|none] [--beam] [--clips a,b]`.
+/// Hidden mode: `Freeflow --bench <manifest.json> --out <dir> [--trim A/B|none] [--beam] [--tick ms] [--clips a,b]`.
 ///
 /// For every clip in the manifest it decodes the whole clip once (offline), then
-/// replays it at the app's 350 ms tick through the same StreamingSession the app
+/// replays it at the app's 350 ms tick (or --tick) through the same StreamingSession the app
 /// runs, and scores both against the reference. Writes:
 ///   <dir>/summary.csv        one row per clip plus an ALL row (corpus WER)
 ///   <dir>/run.json           settings, model hash and machine
@@ -34,7 +34,7 @@ enum Bench {
             let args = CommandLine.arguments
             guard let mi = args.firstIndex(of: "--bench"), mi + 1 < args.count,
                   let oi = args.firstIndex(of: "--out"), oi + 1 < args.count else {
-                print("usage: Freeflow --bench <manifest.json> --out <dir> [--trim A/B|none] [--beam] [--clips a,b]")
+                print("usage: Freeflow --bench <manifest.json> --out <dir> [--trim A/B|none] [--beam] [--tick ms] [--clips a,b]")
                 exit(2)
             }
             try await go(manifest: URL(fileURLWithPath: args[mi + 1]), out: URL(fileURLWithPath: args[oi + 1]))
@@ -148,7 +148,7 @@ enum Bench {
         }
         var lines: [[String: Any]] = [[
             "clip": clip.id, "reference": clip.text, "seconds": r3(row.seconds),
-            "tick_ms": 350, "trim_after_s": session.streamer.config.trimAfter.isFinite
+            "tick_ms": SelfTest.tickMs, "trim_after_s": session.streamer.config.trimAfter.isFinite
                 ? session.streamer.config.trimAfter : -1,
             "context_s": session.streamer.config.context, "decoding": SelfTest.decodingArg().rawValue,
         ]]
@@ -180,7 +180,7 @@ enum Bench {
             "decoding": decoding.rawValue,
             "trim_after_s": config.trimAfter.isFinite ? config.trimAfter : -1,
             "context_s": config.context,
-            "tick_ms": 350,
+            "tick_ms": SelfTest.tickMs,
             "clips": clips,
             "machine": sysctl("hw.model") + ", " + sysctl("machdep.cpu.brand_string"),
             "macos": ProcessInfo.processInfo.operatingSystemVersionString,

@@ -8,9 +8,15 @@ import SwiftWhisper
 ///
 ///   Freeflow --selftest <wav>        per-tick deltas and the streamed result
 ///   Freeflow --selftest-proc <wav>   the same, piped through TextProcessor
-///   (either takes --beam, and --trim <after>/<context> to override the window)
+///   (either takes --beam, --trim <after>/<context> to override the window,
+///   and --tick <ms> to override the app's 350 ms tick)
 enum SelfTest {
-    static let tickSamples = Int(0.35 * 16000)
+    static var tickMs: Int {
+        guard let i = CommandLine.arguments.firstIndex(of: "--tick"), i + 1 < CommandLine.arguments.count,
+              let ms = Int(CommandLine.arguments[i + 1]), ms > 0 else { return 350 }
+        return ms
+    }
+    static var tickSamples: Int { tickMs * 16 }
 
     static func run(_ wavPath: String) { spawn { try await go(wavPath) } }
     static func runProc(_ wavPath: String) { spawn { try await goProc(wavPath) } }
@@ -49,15 +55,16 @@ enum SelfTest {
         return Whisper(fromFileURL: url, withParams: WhisperSetup.params(decoding))
     }
 
-    /// Feeds the clip to `session` as it would arrive live: one tick per 350 ms
+    /// Feeds the clip to `session` as it would arrive live: one tick per tickMs
     /// of audio, then the stop pass. Calls `onCommit` with each tick's words.
     static func replay(_ frames: [Float], session: StreamingSession, decoder: WordDecoder,
                        onCommit: (Double, [Word]) -> Void = { _, _ in }) async throws {
-        var k = tickSamples
+        let step = tickSamples
+        var k = step
         while k < frames.count {
             let words = try await session.tick(audio: Array(frames[..<k]), decoder: decoder)
             if !words.isEmpty { onCommit(Double(k) / 16000, words) }
-            k += tickSamples
+            k += step
         }
         let tail = try await session.finish(audio: frames, decoder: decoder)
         if !tail.isEmpty { onCommit(Double(frames.count) / 16000, tail) }
