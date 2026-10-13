@@ -1,5 +1,6 @@
 import Carbon.HIToolbox
 import Foundation
+import FreeflowCore
 
 /// Persisted user settings (UserDefaults). The whole config surface: which key
 /// triggers dictation, tap-vs-hold, and how long a silence ends an utterance.

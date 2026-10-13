@@ -1,4 +1,5 @@
 import Foundation
+import FreeflowCore
 
 /// Tiny append-only diagnostic log at /tmp/freeflow-diag.log — capture shortfall
 /// vs. model skip, for tuning. OFF by default: it writes the user's transcripts

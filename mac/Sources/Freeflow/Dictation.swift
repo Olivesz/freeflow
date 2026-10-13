@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import FreeflowCore
 import SwiftWhisper
 
 /// Locates the whisper model: bundled in the app first, else the copy that the
@@ -19,7 +20,8 @@ enum ModelLocator {
 /// so nothing already typed is ever revised or deleted. Auto-stops on silence.
 final class Dictation {
     private let audio = AudioCapture()
-    private let streamer = WhisperStreamer()
+    private let session = StreamingSession()
+    private var streamer: WhisperStreamer { session.streamer }
     private let processor = TextProcessor()
     private var whisper: Whisper?
 
@@ -36,7 +38,7 @@ final class Dictation {
     private let tickMs = 350
     private var silenceMs: Int { Settings.shared.silenceMs }   // live-tunable in settings
     private let graceMs = 400
-    private let silenceFloor: Float = 0.006
+    private let silenceFloor = StreamingSession.silenceFloor
 
     var isReady: Bool { whisper != nil }
 
@@ -47,26 +49,9 @@ final class Dictation {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in self?.loadModel() }
     }
 
-    /// Decoding strategy. MUST stay greedy: beam search SIGTRAPs whisper.cpp
-    /// (exit 133) on some audio, crashing the app mid-dictation and losing the
-    /// user's words. Its quality edge is also gone with the small rolling window.
-    /// A regression test (`--test-text`) fails if this is ever set to beam.
-    static let samplingStrategy: WhisperSamplingStrategy = .greedy
-    static var isGreedyDecoding: Bool {
-        switch samplingStrategy { case .greedy: return true; default: return false }
-    }
-
     private func loadModel() {
         guard let url = ModelLocator.baseEN() else { return }
-        let params = WhisperParams(strategy: Dictation.samplingStrategy)
-        params.language = .english
-        params.token_timestamps = true
-        params.max_len = 1              // one word per segment → word-level timing
-        params.split_on_word = true
-        params.single_segment = false
-        params.print_realtime = false
-        params.print_progress = false
-        let w = Whisper(fromFileURL: url, withParams: params)
+        let w = Whisper(fromFileURL: url, withParams: WhisperSetup.params(.shipped))
         DispatchQueue.main.async { [weak self] in self?.whisper = w }
     }
 
@@ -74,7 +59,7 @@ final class Dictation {
 
     func start() {
         guard whisper != nil, !isRunning else { return }
-        streamer.reset()
+        session.reset()
         processor.config = Settings.shared.textProcessorConfig()   // pick up live toggle/vocab changes
         processor.reset()
         do { try audio.start() } catch { return }
@@ -103,7 +88,7 @@ final class Dictation {
 
     private func loop() async {
         guard let whisper else { return }
-        var silence = 0, elapsed = 0
+        var endpointer = SilenceEndpointer(tickMs: tickMs, graceMs: graceMs, silenceFloor: silenceFloor)
         let recordStart = Date()
         var maxTranscribeMs = 0, ticks = 0
 
@@ -111,24 +96,19 @@ final class Dictation {
             let started = Date()
             let full = audio.snapshot()
             let startS = streamer.windowStartSample()
-            if full.count - startS >= 8000 {                // ≥ 0.5 s of window
-                let window = trimTrailingSilence(Array(full[startS...]))
-                if rms(window) >= silenceFloor {            // skip dead-silent windows
-                    let t0 = Date()
-                    let segs = try? await whisper.transcribe(audioFrames: window)
-                    maxTranscribeMs = max(maxTranscribeMs, Int(Date().timeIntervalSince(t0) * 1000))
-                    ticks += 1
-                    if let segs {
-                        let ops = processor.feed(streamer.process(window: segs))
-                        if !ops.isEmpty { emit(ops) }
-                    }
+            var level: Float?                               // nil = window too short to judge
+            if full.count - startS >= StreamingSession.minWindowSamples {
+                let before = session.passes.count
+                if let words = try? await session.tick(audio: full, decoder: whisper) {
+                    let ops = processor.feed(words)
+                    if !ops.isEmpty { emit(ops) }
                 }
-                if elapsed >= graceMs {                     // VAD auto-stop
-                    silence = audio.recentRMS(ms: tickMs) < silenceFloor ? silence + tickMs : 0
+                if session.passes.count > before, let p = session.passes.last {
+                    maxTranscribeMs = max(maxTranscribeMs, Int(p.decodeMs)); ticks += 1
                 }
-                if silence >= silenceMs { running = false }
+                level = audio.recentRMS(ms: tickMs)
             }
-            elapsed += tickMs
+            if endpointer.tick(rms: level, silenceMs: silenceMs) { running = false }   // VAD auto-stop
             let spent = Int(Date().timeIntervalSince(started) * 1000)
             if spent < tickMs {
                 try? await Task.sleep(nanoseconds: UInt64(tickMs - spent) * 1_000_000)
@@ -138,11 +118,9 @@ final class Dictation {
         // final flush — trim the trailing silence (auto-stop leaves ~1.5s of it,
         // which is exactly what Whisper hallucinates "thank you" etc. onto).
         let full = audio.snapshot()
-        let startS = streamer.windowStartSample()
-        let tail = trimTrailingSilence(Array(full[max(0, startS)...]))
         var finalOps: [TextOp] = []
-        if tail.count > 800, let segs = try? await whisper.transcribe(audioFrames: tail) {
-            finalOps += processor.feed(streamer.finalize(window: segs))
+        if let words = try? await session.finish(audio: full, decoder: whisper) {
+            finalOps += processor.feed(words)
         }
         finalOps += processor.flush()          // emit any word held for lookahead
         if !finalOps.isEmpty { emit(finalOps) }
@@ -161,29 +139,32 @@ final class Dictation {
     private func emit(_ ops: [TextOp]) {
         DispatchQueue.main.async { self.onOps?(ops) }
     }
+}
 
-    private func rms(_ frames: [Float]) -> Float {
-        guard !frames.isEmpty else { return 0 }
-        let sum = frames.reduce(Float(0)) { $0 + $1 * $1 }
-        return (sum / Float(frames.count)).squareRoot()
+/// whisper.cpp parameters shared by the app, --selftest and --bench.
+enum WhisperSetup {
+    static func params(_ decoding: Decoding) -> WhisperParams {
+        let params = WhisperParams(strategy: decoding == .beam ? .beamSearch : .greedy)
+        params.language = .english
+        params.token_timestamps = true
+        params.max_len = 1              // one word per segment → word-level timing
+        params.split_on_word = true
+        params.single_segment = false
+        params.print_realtime = false
+        params.print_progress = false
+        return params
     }
+}
 
-    /// Cut trailing quiet off the window so Whisper never transcribes silence
-    /// (which it "fills in" with hallucinated phrases like "thank you"). Scans
-    /// back in 50ms frames to the last voiced one and keeps ~0.2s of padding.
-    private func trimTrailingSilence(_ frames: [Float]) -> [Float] {
-        let frame = 800                                   // 50 ms @ 16 kHz
-        let floor: Float = 0.010
-        var i = frames.count - frame
-        while i > 0 {
-            let slice = frames[i..<min(i + frame, frames.count)]
-            let s = slice.reduce(Float(0)) { $0 + $1 * $1 }
-            if (s / Float(slice.count)).squareRoot() > floor {
-                let end = min(frames.count, i + frame + 3200)   // keep +0.2 s
-                return end < frames.count ? Array(frames[0..<end]) : frames
-            }
-            i -= frame
-        }
-        return frames   // no clear voiced tail found — leave it, other guards apply
+extension Whisper: WordDecoder {
+    public func words(_ frames: [Float]) async throws -> [Word] {
+        try await transcribe(audioFrames: frames).words
+    }
+}
+
+extension Array where Element == Segment {
+    /// Decoder output as core `Word`s, times in seconds relative to the window.
+    var words: [Word] {
+        map { Word(text: $0.text, start: Double($0.startTime) / 1000, end: Double($0.endTime) / 1000) }
     }
 }

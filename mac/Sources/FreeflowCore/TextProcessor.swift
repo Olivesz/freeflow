@@ -3,7 +3,7 @@ import Foundation
 /// One edit to apply to the focused field. `insert` types text; `delete`
 /// backspaces N characters (bounded to what THIS utterance typed, so it can
 /// never eat the user's pre-existing text).
-enum TextOp: Equatable {
+public enum TextOp: Equatable {
     case insert(String)
     case delete(Int)
 }
@@ -21,29 +21,35 @@ enum TextOp: Equatable {
 /// also tracks **pauses** (gaps between committed word timestamps): a pause marks
 /// a phrase boundary, so "scratch that" stops there even when Whisper forgot the
 /// sentence period — otherwise "scratch that" could wipe a whole paragraph.
-/// Pure and deterministic — `--test-text` verifies it fully with no audio.
-final class TextProcessor {
-    struct Config {
-        var filler = true
-        var commands = true
-        var punctuation = false
-        var autoCap = true
-        var vocab: [String: String] = [:]   // normalized key → replacement
+/// Pure and deterministic, so FreeflowCoreTests covers it with no audio.
+public final class TextProcessor {
+    public struct Config {
+        public var filler = true
+        public var commands = true
+        public var punctuation = false
+        public var autoCap = true
+        public var vocab: [String: String] = [:]   // normalized key → replacement
+
+        public init(filler: Bool = true, commands: Bool = true, punctuation: Bool = false,
+                    autoCap: Bool = true, vocab: [String: String] = [:]) {
+            self.filler = filler; self.commands = commands; self.punctuation = punctuation
+            self.autoCap = autoCap; self.vocab = vocab
+        }
     }
-    var config: Config
+    public var config: Config
 
     /// A gap this long before a word is treated as a phrase boundary.
-    static let pauseSeconds = 0.35
+    public static let pauseSeconds = 0.35
 
-    static let fillerWords: Set<String> = [
+    public static let fillerWords: Set<String> = [
         "um", "uh", "uhh", "uhm", "umm", "er", "err", "erm", "hmm", "mm", "mhm",
     ]
-    static let punctuationWords: [String: String] = [
+    public static let punctuationWords: [String: String] = [
         "period": ".", "comma": ",", "colon": ":", "semicolon": ";",
         "hyphen": "-", "dash": "—", "ellipsis": "…",
     ]
 
-    init(config: Config = Config()) { self.config = config; reset() }
+    public init(config: Config = Config()) { self.config = config; reset() }
 
     // MARK: streaming state
     /// A starter word held for lookahead. `atStart` = it began at a boundary
@@ -53,12 +59,12 @@ final class TextProcessor {
     private var suppressLeadingSpace = true
     private var atSentenceStart = true
     private var lastEnd = -1.0                 // end time of the previous word (for gap calc)
-    private(set) var emitted = ""              // all text inserted this utterance
+    public private(set) var emitted = ""              // all text inserted this utterance
     private var boundaries = [0]               // emitted-offsets where "scratch that" may stop
     private var emittedWords: [(start: Int, norm: String)] = []   // word spans, for multi-word vocab
     private var multiVocab: [(words: [String], replacement: String)] = []  // ≥2-word keys, longest first
 
-    func reset() {
+    public func reset() {
         pending = nil; pendingCmd = nil; suppressLeadingSpace = true; atSentenceStart = true
         lastEnd = -1; emitted = ""; boundaries = [0]; emittedWords = []
         // Split multi-word vocab keys out once per utterance (matched on Whisper's
@@ -69,7 +75,7 @@ final class TextProcessor {
         }.sorted { $0.words.count > $1.words.count }
     }
 
-    func feed(_ words: [Word]) -> [TextOp] {
+    public func feed(_ words: [Word]) -> [TextOp] {
         var ops: [TextOp] = []
         for w in words {
             let pause = lastEnd >= 0 && (w.start - lastEnd) >= Self.pauseSeconds
@@ -82,7 +88,7 @@ final class TextProcessor {
 
     /// Utterance ended — an unresolved command fires (end of utterance IS a
     /// boundary), then emit any word still held for lookahead.
-    func flush() -> [TextOp] {
+    public func flush() -> [TextOp] {
         var ops: [TextOp] = []
         if let pc = pendingCmd { pendingCmd = nil; ops += emit(pc.phrase) }
         if let held = pending { pending = nil; ops += emitWord(held.text, pause: held.atStart) }
