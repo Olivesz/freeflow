@@ -20,16 +20,18 @@ enum ModelLocator {
 final class Dictation {
     private let audio = AudioCapture()
     private let streamer = WhisperStreamer()
+    private let processor = TextProcessor()
     private var whisper: Whisper?
 
     private var running = false
     private(set) var isRunning = false
 
-    /// (backspaces, text) — kept for API symmetry with the injector; whisper's
-    /// stream is append-only, so backspaces is always 0.
-    var onEdit: ((Int, String) -> Void)?
+    /// Edits to apply to the focused field (insert text / bounded backspace).
+    var onOps: (([TextOp]) -> Void)?
     var onState: ((Bool) -> Void)?
     var onLevel: ((Float) -> Void)?          // live mic loudness 0…1 (for UI reactivity)
+    /// Final transcript text when an utterance ends (for history). "" is skipped.
+    var onFinished: ((String) -> Void)?
 
     private let tickMs = 350
     private var silenceMs: Int { Settings.shared.silenceMs }   // live-tunable in settings
@@ -38,11 +40,25 @@ final class Dictation {
 
     var isReady: Bool { whisper != nil }
 
-    init() { loadModel() }
+    // Load the model OFF the main thread: on a fresh build the Core ML encoder
+    // compiles for the Neural Engine ("first run may take a while"), which would
+    // otherwise block the UI and leave the window blank for seconds at launch.
+    init() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in self?.loadModel() }
+    }
+
+    /// Decoding strategy. MUST stay greedy: beam search SIGTRAPs whisper.cpp
+    /// (exit 133) on some audio, crashing the app mid-dictation and losing the
+    /// user's words. Its quality edge is also gone with the small rolling window.
+    /// A regression test (`--test-text`) fails if this is ever set to beam.
+    static let samplingStrategy: WhisperSamplingStrategy = .greedy
+    static var isGreedyDecoding: Bool {
+        switch samplingStrategy { case .greedy: return true; default: return false }
+    }
 
     private func loadModel() {
         guard let url = ModelLocator.baseEN() else { return }
-        let params = WhisperParams(strategy: .beamSearch)   // fewer skips/mishears than greedy
+        let params = WhisperParams(strategy: Dictation.samplingStrategy)
         params.language = .english
         params.token_timestamps = true
         params.max_len = 1              // one word per segment → word-level timing
@@ -50,7 +66,8 @@ final class Dictation {
         params.single_segment = false
         params.print_realtime = false
         params.print_progress = false
-        whisper = Whisper(fromFileURL: url, withParams: params)
+        let w = Whisper(fromFileURL: url, withParams: params)
+        DispatchQueue.main.async { [weak self] in self?.whisper = w }
     }
 
     func toggle() { isRunning ? stop() : start() }
@@ -58,6 +75,8 @@ final class Dictation {
     func start() {
         guard whisper != nil, !isRunning else { return }
         streamer.reset()
+        processor.config = Settings.shared.textProcessorConfig()   // pick up live toggle/vocab changes
+        processor.reset()
         do { try audio.start() } catch { return }
         running = true; isRunning = true
         onState?(true)
@@ -100,8 +119,8 @@ final class Dictation {
                     maxTranscribeMs = max(maxTranscribeMs, Int(Date().timeIntervalSince(t0) * 1000))
                     ticks += 1
                     if let segs {
-                        let delta = streamer.process(window: segs)
-                        if !delta.isEmpty { emit(delta) }
+                        let ops = processor.feed(streamer.process(window: segs))
+                        if !ops.isEmpty { emit(ops) }
                     }
                 }
                 if elapsed >= graceMs {                     // VAD auto-stop
@@ -121,10 +140,16 @@ final class Dictation {
         let full = audio.snapshot()
         let startS = streamer.windowStartSample()
         let tail = trimTrailingSilence(Array(full[max(0, startS)...]))
+        var finalOps: [TextOp] = []
         if tail.count > 800, let segs = try? await whisper.transcribe(audioFrames: tail) {
-            let delta = streamer.finalize(window: segs)
-            if !delta.isEmpty { emit(delta) }
+            finalOps += processor.feed(streamer.finalize(window: segs))
         }
+        finalOps += processor.flush()          // emit any word held for lookahead
+        if !finalOps.isEmpty { emit(finalOps) }
+
+        let finalText = processor.emitted.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !finalText.isEmpty { let t = finalText; await MainActor.run { self.onFinished?(t) } }
+
         Diag.utterance(fullSamples: full.count, wall: Date().timeIntervalSince(recordStart),
                        maxTranscribeMs: maxTranscribeMs, ticks: ticks,
                        words: streamer.committedWords) { self.audio.rms(fromSec: $0, toSec: $1) }
@@ -133,8 +158,8 @@ final class Dictation {
         await MainActor.run { self.onState?(false) }
     }
 
-    private func emit(_ text: String) {
-        DispatchQueue.main.async { self.onEdit?(0, text) }
+    private func emit(_ ops: [TextOp]) {
+        DispatchQueue.main.async { self.onOps?(ops) }
     }
 
     private func rms(_ frames: [Float]) -> Float {

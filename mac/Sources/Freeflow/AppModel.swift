@@ -28,6 +28,64 @@ final class AppModel: ObservableObject {
     @Published var launchAtLogin = LoginItem.isEnabled
     @Published var recordingShortcut = false
     @Published var accessibilityOK = Permissions.accessibilityTrusted(prompt: false)
+    /// True while dictating without Accessibility — keystrokes can't land, so the
+    /// HUD stays up as a warning + recovery surface instead of failing silently.
+    @Published var injectionBlocked = false
+    /// True while the HUD shows a transient status (e.g. "warming up…"), so it
+    /// doesn't offer a Copy button for a non-transcript message.
+    @Published var statusFlash = false
+
+    // MARK: Voice-feature toggles (write through to Settings; Dictation reads them at start)
+    @Published var fillerCleanup = Settings.shared.fillerCleanup {
+        didSet { Settings.shared.fillerCleanup = fillerCleanup }
+    }
+    @Published var voiceCommands = Settings.shared.voiceCommands {
+        didSet { Settings.shared.voiceCommands = voiceCommands }
+    }
+    @Published var spokenPunctuation = Settings.shared.spokenPunctuation {
+        didSet { Settings.shared.spokenPunctuation = spokenPunctuation }
+    }
+    @Published var autoCapitalize = Settings.shared.autoCapitalize {
+        didSet { Settings.shared.autoCapitalize = autoCapitalize }
+    }
+
+    // MARK: Custom vocabulary
+    @Published var vocab: [String: String] = Settings.shared.vocab
+    /// Sorted for stable display in the editor.
+    var vocabPairs: [(spoken: String, replacement: String)] {
+        vocab.sorted { $0.key < $1.key }.map { (spoken: $0.key, replacement: $0.value) }
+    }
+    func addVocab(_ spoken: String, _ replacement: String) {
+        let key = spoken.trimmingCharacters(in: .whitespaces).lowercased()
+        let val = replacement.trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty, !val.isEmpty else { return }
+        vocab[key] = val
+        Settings.shared.vocab = vocab
+    }
+    func removeVocab(_ key: String) {
+        vocab[key] = nil
+        Settings.shared.vocab = vocab
+    }
+
+    // MARK: History
+    /// Recent dictations, newest first (mirrors HistoryStore for the UI).
+    @Published var history: [Dictation_Entry] = HistoryStore.shared.entries
+
+    /// Record a finished dictation into history (persisted + published).
+    func recordHistory(_ text: String) {
+        HistoryStore.shared.add(text)
+        history = HistoryStore.shared.entries
+    }
+    func clearHistory() {
+        HistoryStore.shared.clear()
+        history = []
+    }
+    func copyToClipboard(_ text: String) {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(text, forType: .string)
+        showCaptureNote("copied")
+    }
 
     // Wired by AppDelegate.
     var onToggleDictation: () -> Void = {}

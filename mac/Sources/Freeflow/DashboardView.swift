@@ -26,19 +26,31 @@ struct FlowView: View {
     }
 }
 
-/// The freeflow window: a calm, living surface. Animated ink current + a
-/// breathing, voice-reactive glow. The light tracks loudness (fast); the flow
-/// tracks a smoothed envelope (slow) — two instruments, not one.
+/// The freeflow window: a calm, living surface up top (animated ink current +
+/// breathing voice-reactive glow), with a compact Setup / Words / History panel
+/// below. The light tracks loudness (fast); the flow tracks a smoothed envelope
+/// (slow) — two instruments, not one.
 struct DashboardView: View {
     @ObservedObject var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var breathe = false
+    // FF_TAB lets a dev screenshot a specific tab of the live window; defaults to Setup.
+    @State private var tab: Tab = {
+        switch ProcessInfo.processInfo.environment["FF_TAB"] {
+        case "words": return .words
+        case "history": return .history
+        default: return .setup
+        }
+    }()
+
+    enum Tab: String, CaseIterable { case setup = "Setup", words = "Words", history = "History" }
 
     private var accent: Color {
         model.recording ? Color(red: 0.98, green: 0.74, blue: 0.55)
                         : Color(red: 0.72, green: 0.86, blue: 0.98)
     }
     private var glowOpacity: Double {
-        model.recording ? min(0.85, 0.45 + model.glowLevel * 0.5) : 0.4   // never too dim/bright
+        model.recording ? min(0.85, 0.45 + model.glowLevel * 0.5) : 0.4
     }
 
     var body: some View {
@@ -46,15 +58,21 @@ struct DashboardView: View {
             Color.black
             FlowView(clock: model.flowClock, brightness: model.recording ? 0.7 : 0.3)
             glow
-            LinearGradient(colors: [.black.opacity(0.35), .clear, .black.opacity(0.55)],
+            LinearGradient(colors: [.black.opacity(0.30), .clear, .black.opacity(0.65)],
                            startPoint: .top, endPoint: .bottom)
-            content
+            VStack(spacing: 16) {
+                header
+                panel
+            }
+            .padding(20)
         }
-        .frame(width: 440, height: 600)
+        .frame(width: 440, height: 708)
         .preferredColorScheme(.dark)
         .onAppear {
-            updateFlowSpeed()   // the window controller starts/stops the clock by focus
-            withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) { breathe = true }
+            updateFlowSpeed()
+            if !reduceMotion {   // respect the system Reduce Motion setting
+                withAnimation(.easeInOut(duration: 4).repeatForever(autoreverses: true)) { breathe = true }
+            }
         }
         .onChange(of: model.recording) { _, _ in updateFlowSpeed() }
         .onChange(of: model.level) { _, _ in updateFlowSpeed() }
@@ -64,6 +82,8 @@ struct DashboardView: View {
         model.flowClock.targetSpeed = model.recording ? (0.032 + model.level * 0.05) : 0.014
     }
 
+    // MARK: - Hero
+
     private var glow: some View {
         Circle()
             .fill(RadialGradient(colors: [accent.opacity(0.9), accent.opacity(0.0)],
@@ -72,71 +92,50 @@ struct DashboardView: View {
             .blur(radius: 34)
             .scaleEffect((breathe ? 1.05 : 0.95) * (1 + model.glowLevel * 0.3))
             .opacity(glowOpacity)
-            .animation(.easeOut(duration: 0.2), value: model.glowLevel)
-            .offset(y: -40)
+            .offset(y: -210)
             .blendMode(.plusLighter)
     }
 
-    private var content: some View {
-        VStack(spacing: 0) {
-            Spacer()
+    private var header: some View {
+        VStack(spacing: 6) {
             Text("freeflow")
-                .font(.system(size: 40, weight: .medium, design: .serif))
+                .font(.system(size: 34, weight: .medium, design: .serif))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.4), radius: 12)
             Text(model.recording ? "listening" : "dictate anywhere")
-                .font(.system(size: 11, weight: .semibold)).tracking(5)
+                .font(.system(size: 10, weight: .semibold)).tracking(5)
                 .textCase(.uppercase).foregroundStyle(accent.opacity(0.85))
-                .padding(.top, 8).contentTransition(.opacity)
+                .contentTransition(.opacity)
             if !model.captureNote.isEmpty {
                 Text(model.captureNote)
                     .font(.system(size: 11)).foregroundStyle(.white.opacity(0.8))
-                    .padding(.top, 12).transition(.opacity)
+                    .transition(.opacity)
             }
-            Spacer()
-            controls
         }
-        .padding(24)
+        .padding(.top, 18)
     }
 
-    private var controls: some View {
+    // MARK: - Panel
+
+    private var panel: some View {
         VStack(spacing: 12) {
-            if !model.accessibilityOK {
-                Button(action: model.grantAccessibility) {
-                    Label("Grant Accessibility to type into apps", systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.yellow)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }.buttonStyle(.plain)
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
-            HStack {
-                Text("Shortcut").foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Text(model.shortcutLabel)
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
-                Button(model.recordingShortcut ? "press…" : "change") { model.beginRecordShortcut() }
-                    .buttonStyle(.borderless).tint(accent).font(.system(size: 12))
+            .pickerStyle(.segmented).labelsHidden()
+
+            Group {
+                switch tab {
+                case .setup:   SetupPanel(model: model)
+                case .words:   VocabPanel(model: model)
+                case .history: HistoryPanel(model: model)
+                }
             }
-            HStack {
-                Text("Auto-stop").foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Slider(value: Binding(get: { model.silenceMs }, set: { model.setSilence($0) }),
-                       in: 600...3000).frame(width: 130).tint(accent)
-                Text("\(Int(model.silenceMs)) ms")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.55)).frame(width: 54, alignment: .trailing)
-            }
-            HStack {
-                Text("Launch at login").foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Toggle("", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunch($0) }))
-                    .labelsHidden().tint(accent)
-            }
+            .frame(height: 348)
         }
-        .font(.system(size: 13))
         .padding(16)
-        .background(.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.08)))
+        .background(.black.opacity(0.30), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.08)))
+        .font(.system(size: 13))
     }
 }

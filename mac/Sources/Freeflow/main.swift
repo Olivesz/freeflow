@@ -6,9 +6,21 @@ if let i = CommandLine.arguments.firstIndex(of: "--selftest"),
     SelfTest.run(CommandLine.arguments[i + 1])   // never returns
 }
 
+if CommandLine.arguments.contains("--test-text") {
+    TextProcessorTest.run()   // never returns
+}
+
+if let i = CommandLine.arguments.firstIndex(of: "--selftest-proc"),
+   i + 1 < CommandLine.arguments.count {
+    SelfTest.runProc(CommandLine.arguments[i + 1])   // never returns
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--render-ui"), i + 1 < CommandLine.arguments.count {
     RenderUI.run(CommandLine.arguments[i + 1])   // never returns
 }
+
+// If whisper.cpp (or anything) traps, re-exec instead of vanishing.
+CrashRelaunch.install()
 
 // Menubar-only agent app: no dock icon, no main window.
 let app = NSApplication.shared

@@ -1,12 +1,14 @@
 import Foundation
 
-/// Tiny append-only diagnostic log at /tmp/freeflow-diag.log. Kept on while we
-/// tune quality: it pinpoints the "swallowed words" bug — capture shortfall vs.
-/// model skip. (Logs transcripts to /tmp; strip before a public release.)
+/// Tiny append-only diagnostic log at /tmp/freeflow-diag.log — capture shortfall
+/// vs. model skip, for tuning. OFF by default: it writes the user's transcripts
+/// to disk, so it only runs when `FREEFLOW_DIAG` is set in the environment.
 enum Diag {
     static let path = "/tmp/freeflow-diag.log"
+    static let enabled = ProcessInfo.processInfo.environment["FREEFLOW_DIAG"] != nil
 
     static func log(_ s: String) {
+        guard enabled else { return }
         let line = s + "\n"
         guard let data = line.data(using: .utf8) else { return }
         if let h = FileHandle(forWritingAtPath: path) {
@@ -27,6 +29,7 @@ extension Diag {
     /// that coincided with speech-level energy (model skips).
     static func utterance(fullSamples: Int, wall: Double, maxTranscribeMs: Int,
                           ticks: Int, words: [Word], rmsIn: (Double, Double) -> Float) {
+        guard enabled else { return }
         let captured = Double(fullSamples) / 16000.0
         log("── utterance @ \(Date()) ──")
         log("wall=\(r1(wall))s captured=\(r1(captured))s  shortfall=\(r1(wall - captured))s"

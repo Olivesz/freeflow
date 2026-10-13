@@ -39,21 +39,21 @@ final class WhisperStreamer {
     func windowStartSample() -> Int { Int(offset * Double(sampleRate)) }
 
     /// One live pass. `segments` are whisper word-segments over the current
-    /// window (times relative to the window start). Returns newly-stable text.
-    func process(window segments: [Segment]) -> String {
+    /// window (times relative to the window start). Returns the newly-stable words.
+    func process(window segments: [Segment]) -> [Word] {
         let words = agree(words: toWords(segments))
         if lastTime - offset > trimAfter {           // bound per-tick cost
             offset = max(offset, lastTime - context)
         }
-        return words.map(\.text).joined()
+        return words
     }
 
     /// Final pass on stop: commit whatever's left in the tail.
-    func finalize(window segments: [Segment]) -> String {
+    func finalize(window segments: [Segment]) -> [Word] {
         let remaining = stripCommitted(toWords(segments))
         if let last = remaining.last { lastTime = last.end }
         committed.append(contentsOf: remaining)
-        return remaining.map(\.text).joined()
+        return remaining
     }
 
     // MARK: - internals

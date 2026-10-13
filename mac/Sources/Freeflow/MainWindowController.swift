@@ -19,7 +19,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.backgroundColor = .black
         window.title = "freeflow"
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 440, height: 600))
+        window.setContentSize(NSSize(width: 440, height: 708))
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -32,10 +32,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    // Animate only while the window is actually being looked at.
-    func windowDidBecomeKey(_ notification: Notification) { model.flowClock.start() }
+    /// Respect the system "Reduce Motion" accessibility setting — leave the ink
+    /// current still rather than travelling.
+    private var mayAnimate: Bool { !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    // Animate only while the window is actually being looked at (and motion is allowed).
+    func windowDidBecomeKey(_ notification: Notification) { if mayAnimate { model.flowClock.start() } }
     func windowDidResignKey(_ notification: Notification) { model.flowClock.stop() }
     func windowWillClose(_ notification: Notification) { model.flowClock.stop() }
     func windowDidMiniaturize(_ notification: Notification) { model.flowClock.stop() }
-    func windowDidDeminiaturize(_ notification: Notification) { model.flowClock.start() }
+    func windowDidDeminiaturize(_ notification: Notification) { if mayAnimate { model.flowClock.start() } }
 }

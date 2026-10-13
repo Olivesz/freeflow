@@ -19,34 +19,45 @@ struct HUDView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(accent)
-                .frame(width: 9, height: 9)
-                .shadow(color: accent, radius: 5 + model.glowLevel * 8)
-                .scaleEffect(model.recording ? 1 + model.glowLevel * 0.7 : 1)
-                .animation(.easeOut(duration: 0.15), value: model.glowLevel)
+        VStack(alignment: .leading, spacing: 6) {
+            if model.injectionBlocked {
+                Label("Grant Accessibility to type into apps — your words are safe here, tap Copy.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.yellow)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(accent)
+                    .frame(width: 9, height: 9)
+                    .shadow(color: accent, radius: 5 + model.glowLevel * 8)
+                    .scaleEffect(model.recording ? 1 + model.glowLevel * 0.7 : 1)
+                    .animation(.easeOut(duration: 0.15), value: model.glowLevel)
 
-            Text(text)
-                .font(.system(size: 13.5))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(2)
-                .truncationMode(.head)                 // keep the newest words in view
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(text)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(2)
+                    .truncationMode(.head)                 // keep the newest words in view
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !model.recording && !model.transcript.isEmpty {
-                Button(action: onCopy) {
-                    Image(systemName: "doc.on.doc").font(.system(size: 13))
+                if !model.statusFlash && !model.transcript.isEmpty && (!model.recording || model.injectionBlocked) {
+                    Button(action: onCopy) {
+                        Image(systemName: "doc.on.doc").font(.system(size: 13))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(accent)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(accent)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
         .frame(width: 420)
-        .background(.black.opacity(0.74), in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.12)))
+        .background(.black.opacity(0.78),
+                    in: RoundedRectangle(cornerRadius: model.injectionBlocked ? 16 : 32))
+        .overlay(RoundedRectangle(cornerRadius: model.injectionBlocked ? 16 : 32)
+            .stroke(.white.opacity(0.12)))
         .preferredColorScheme(.dark)
     }
 }
