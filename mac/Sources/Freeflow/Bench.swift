@@ -50,6 +50,7 @@ enum Bench {
         }
         let decoding = SelfTest.decodingArg()
         let config = SelfTest.configArg()
+        let loadStart = loadAverage()
         let whisper = try SelfTest.loadWhisper(decoding)
         let logs = out.appendingPathComponent("logs")
         try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
@@ -89,7 +90,7 @@ enum Bench {
                          clip.id, row.stream.wer, row.offline.wer, row.stream.deletions, row.stream.reference))
         }
         try csv(rows).write(to: out.appendingPathComponent("summary.csv"), atomically: true, encoding: .utf8)
-        try runInfo(decoding: decoding, config: config, clips: rows.count)
+        try runInfo(decoding: decoding, config: config, clips: rows.count, load: (loadStart, loadAverage()))
             .write(to: out.appendingPathComponent("run.json"), atomically: true, encoding: .utf8)
         let all = total(rows)
         print(String(format: "ALL  stream WER %.3f  offline WER %.3f  dropped %d/%d  (%d clips)",
@@ -164,7 +165,10 @@ enum Bench {
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private static func runInfo(decoding: Decoding, config: WhisperStreamer.Config, clips: Int) throws -> String {
+    /// Timing columns depend on what else the machine is doing, so the run
+    /// records the 1-minute load average at its start and end.
+    private static func runInfo(decoding: Decoding, config: WhisperStreamer.Config, clips: Int,
+                                load: (Double, Double)) throws -> String {
         let model = ModelLocator.baseEN()
         let encoder = model.map {
             $0.deletingLastPathComponent().appendingPathComponent("ggml-base.en-encoder.mlmodelc").path
@@ -180,6 +184,9 @@ enum Bench {
             "clips": clips,
             "machine": sysctl("hw.model") + ", " + sysctl("machdep.cpu.brand_string"),
             "macos": ProcessInfo.processInfo.operatingSystemVersionString,
+            "cores": ProcessInfo.processInfo.activeProcessorCount,
+            "load_average_start": r3(load.0),
+            "load_average_end": r3(load.1),
         ]
         let data = try JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted, .sortedKeys])
         return String(decoding: data, as: UTF8.self) + "\n"
@@ -188,6 +195,11 @@ enum Bench {
     // MARK: - helpers
 
     private static func r3(_ x: Double) -> Double { (x * 1000).rounded() / 1000 }
+
+    private static func loadAverage() -> Double {
+        var l = [Double](repeating: 0, count: 3)
+        return getloadavg(&l, 3) > 0 ? l[0] : -1
+    }
 
     private static func cpuSeconds() -> Double {
         var u = rusage()
