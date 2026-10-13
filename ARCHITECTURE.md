@@ -1,112 +1,91 @@
-# freeflow — Cross-Platform Architecture
+# How freeflow works
 
-Turning freeflow from a terminal script into an installable product on **macOS**
-and **iPhone**, keeping it minimal and (mostly) free.
+Two implementations of one idea. The **mac app** (`mac/`, Swift) is the
+product. The **Python app** (`freeflow/`) came first and is kept as the
+reference for the streaming rule; both run the same fixtures.
 
-## Guiding constraint: what surface may insert text?
-
-The OSes differ in what a third-party app is allowed to do. This single table
-drives every decision below.
-
-| Capability | macOS | iOS |
-|---|---|---|
-| Register a global hotkey | ✅ | ❌ |
-| Access mic from background/on-demand | ✅ | ❌ (foreground / entitled surfaces only) |
-| Insert text into **any other app** | ✅ (Accessibility / CGEvent) | ❌ — **only** via a custom keyboard extension |
-| On-device speech model of our choosing | ✅ whisper.cpp | ⚠️ memory-capped; use Apple Speech instead |
-
-**Consequence:** on macOS we keep the engine we built. On iOS, "type anywhere"
-is deliverable *only* through a **custom keyboard**, and the trigger must live on
-that keyboard (there is no way to type into another app from a background gesture).
-
----
-
-## macOS — native Swift menubar app
+## The mac app, one dictation
 
 ```
-┌─ freeflow.app (menubar, no dock icon) ─────────────────────────┐
-│  Launch at login .......... SMAppService (modern login item)    │
-│  Global hotkey ............ toggle / hold, rebindable in-UI      │
-│  Settings window .......... ⌨ hotkey recorder · model · mode ·   │
-│                             launch-at-login · silence delay      │
-│  Engine ................... whisper.cpp + CoreML (Neural Engine) │
-│  Mic ...................... AVAudioEngine @ 16 kHz               │
-│  Insert ................... CGEvent keystrokes / Accessibility   │
-└─────────────────────────────────────────────────────────────────┘
+hotkey ─▶ AudioCapture ─▶ Dictation loop (every 350 ms)
+          16 kHz mono       │
+                            ├─ StreamingSession   skip < 0.5 s or silent windows, cut trailing silence
+                            ├─ whisper.cpp        base.en, greedy, one word per segment with times
+                            ├─ WhisperStreamer    decide which words are stable
+                            ├─ TextProcessor      fillers, voice commands, vocabulary, capitals
+                            └─ TextInjector       synthetic key events into the focused app
+          SilenceEndpointer ends the utterance after the configured quiet
 ```
 
-- **Reuses our validated logic** — streaming stabilization (LocalAgreement),
-  VAD endpointing, and the hallucination guard — ported from Python to the
-  shared Swift core (below). The *algorithms* are done; this is re-expression.
-- **Permissions**: Microphone, Accessibility, Input Monitoring — same three as
-  today, but a proper signed bundle means the grant is stable (no TCC ambiguity
-  like the nested-under-Claude problem).
-- **Hotkey UI**: a "click to record a shortcut" field (the standard macOS
-  pattern). Functional and clean, nothing grand.
+Everything between the decoder and the keyboard lives in `FreeflowCore`, a
+library with no whisper.cpp or UI dependency, so `swift test` covers it with no
+model and no microphone. The app target (`mac/Sources/Freeflow`) adds the
+model, the audio, the menubar, the HUD, onboarding and settings.
 
-## iOS — container app + custom keyboard extension
+### Stable words (`WhisperStreamer`)
 
-```
-┌─ freeflow (container app) ──────────┐   ┌─ freeflowKeyboard (extension) ─────┐
-│  • Onboarding & permissions          │   │  Appears in EVERY text field       │
-│  • Requests: Mic, Speech recognition │   │  Trigger: triple-tap space / mic ⌨ │
-│  • Enable keyboard + Full Access     │   │  Engine: SFSpeechRecognizer         │
-│  • Settings (gesture, on-device)     │   │          (on-device, free, ANE)     │
-└──────────────────────────────────────┘   │  Insert: textDocumentProxy → field  │
-                                            │          (DIRECT, no paste)         │
-                                            └─────────────────────────────────────┘
-```
+Every tick re-decodes the current window, and whisper.cpp may revise any word
+in it. Typed text can't be revised, so a word is only typed once two
+consecutive passes agree on it (LocalAgreement-2).
 
-- **Engine = Apple's on-device Speech framework**, NOT Whisper. Keyboard
-  extensions run under a tight memory ceiling; Whisper won't fit reliably, and
-  `SFSpeechRecognizer(requiresOnDeviceRecognition: true)` is free, private, and
-  Neural-Engine accelerated. On iOS the value is the seamless keyboard UX, not
-  the model.
-- **Trigger** lives on the keyboard: triple-tap the space bar, or a mic key.
-  (Phone-back Back-Tap can't insert text into another app, so it's out for the
-  no-paste requirement.)
-- **Direct insert** via `textDocumentProxy.insertText()` — exactly the "straight
-  into the field" behavior wanted, no clipboard step.
+The hard part is knowing which words of a new pass are already typed. Word
+times from whisper.cpp drift by up to a second between passes, and the last
+word of a pass is stretched toward the end of the window, so the cut is found
+by text: the longest run of the last committed words that the new pass repeats,
+taking the occurrence nearest in time if it appears twice. A time cutoff is the
+fallback when the pass repeats none of them. Times are clamped to the window,
+because whisper.cpp occasionally reports a word ending tens of seconds past the
+audio.
 
-### ⚠️ Risk to de-risk FIRST (1-day spike)
-Whether a keyboard extension can access the **microphone** and run
-**SFSpeechRecognizer** at all (requires "Allow Full Access"; Apple is historically
-restrictive here). **Build a throwaway keyboard that records 2s and inserts the
-transcript before committing to anything else.** The entire iOS plan rests on this.
+To keep each pass fast, the window is trimmed once enough committed audio piles
+up: it restarts a little before the last committed word (`Config.shipped`).
 
-### iOS cost tiers
-- **Your own phone**: free Apple ID + Xcode free provisioning (re-sign weekly). $0.
-- **Share with others**: Apple Developer Program, $99/yr, App Store review.
-- Note: App Groups (shared settings between app & keyboard) need the paid
-  account; a personal v1 keeps settings self-contained in the extension.
+### Edits (`TextProcessor`)
 
----
+Turns committed words into `insert` and `delete` operations. It drops fillers,
+handles "new line", "new paragraph" and "scratch that", applies the custom
+vocabulary (including multi-word keys, by backspace and retype) and capitalises
+sentence starts. Deletes are bounded to what the current utterance typed, so it
+can never erase text that was in the field before.
 
-## Shared core (Swift package: `FreeflowCore`)
+A command only fires when it is said on its own: Whisper ends it with a period
+or capitalises the next word. "Delete that file" stays literal.
 
-Pure, UI-free, testable logic shared by both platforms:
+### Around the loop
 
-- `HypothesisBuffer` — LocalAgreement word stabilization (append-only).
-- `EndpointDetector` — VAD / silence endpointing.
-- Non-speech / hallucination filtering.
-- Config model.
+- **Decoding is greedy.** Beam search makes whisper.cpp SIGTRAP on some audio;
+  `Decoding.shipped` is pinned and a test fails if it changes.
+- **CrashRelaunch** re-execs the app on a fatal signal so the hotkey never goes
+  dead.
+- **HistoryStore** keeps the last 50 transcripts in Application Support.
+- **Diag** writes per-utterance timing to `/tmp/freeflow-diag.log`, only when
+  `FREEFLOW_DIAG` is set, since it includes the transcript.
+- **Permissions:** microphone and Accessibility. The hotkey uses Carbon's
+  `RegisterEventHotKey`, which needs no Input Monitoring grant.
 
-macOS binds this to whisper.cpp; iOS binds it to Apple Speech (which does its own
-endpointing, so iOS uses less of the core). The Python implementation remains the
-reference/prototype and the source of the ported logic + tests.
+### Offline modes of the same binary
 
----
+| Flag | What it does |
+|---|---|
+| `--selftest <wav>` | replays a clip through the live loop's rules and prints each tick's new words |
+| `--selftest-proc <wav>` | the same, through TextProcessor, printing the text that would be typed |
+| `--bench <manifest> --out <dir>` | the benchmark in `bench/` |
+| `--render-ui <dir>` | snapshots the dashboard to PNG |
 
-## Roadmap
+## The Python app
 
-1. **Mac off the terminal** — native Swift menubar app: login item, rebindable
-   hotkey, settings, whisper.cpp engine, our ported logic. *(first buildable)*
-2. **iOS spike** — throwaway keyboard proving mic + on-device Speech + insert.
-3. **iOS v1** — real keyboard extension + container app, on your own device (free).
-4. **Go-public (optional)** — Apple Developer account, notarized Mac app +
-   App Store iOS app, App Groups for shared settings.
+`python -m freeflow` runs the same pipeline in a terminal: `audio.py`
+(sounddevice), `stt.py` (faster-whisper or whisper.cpp, the same streaming
+rule), `vad.py` (adaptive-floor endpointing) and `inject.py` (pynput). Its
+`StreamingTranscriber.commit_window` is the streaming rule with no audio, which
+is what the shared fixtures in `tests/fixtures/streams` drive.
 
-## Open decisions
-- Reach (private vs public) — deferred; nothing here locks it out.
-- Whether to keep the Python prototype maintained alongside, or freeze it once
-  the Swift core lands.
+## Tests
+
+- `pytest` runs the Python suite, including every shared fixture.
+- `cd mac && swift test` runs `FreeflowCoreTests`: the same fixtures, the
+  TextProcessor cases, the session and endpointer rules, and WER scoring.
+- CI also replays the gate clips through the release build with the real
+  model and fails if streaming loses accuracy against offline decoding
+  (`bench/gate.py`). A second run with a deliberately broken window must fail,
+  or CI fails.

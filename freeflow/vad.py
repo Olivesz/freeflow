@@ -6,7 +6,7 @@ end the utterance and auto-insert the text.
 
 This module is intentionally the one place where the *feel* of freeflow lives:
 cut off too eagerly and it clips your last word; wait too long and dictation
-feels laggy. See `is_speech()` below — that's yours to design.
+feels laggy. `is_speech()` below holds the decision.
 """
 
 from __future__ import annotations
