@@ -163,6 +163,8 @@ utterances, run 2026-10-19):
 |---|---|---|---|---|---|
 | Parakeet TDT 0.6B v2 | test-clean | 1.69% | 1.70% | 1.27% | 1.28% |
 | Parakeet TDT 0.6B v2 | test-other | 3.22% | 3.20% | 2.77% | 2.73% |
+| Whisper large-v3-turbo | test-clean | 1.90% | 1.90% | 1.50% | 2.13% |
+| Whisper large-v3-turbo | test-other | 3.98% | 4.00% | 3.49% | 3.71% |
 
 - **Against an independent implementation:** jiwer, which every score here
   uses, and NIST SCTK's `sclite` agree within 0.02 points on the same
@@ -176,6 +178,12 @@ utterances, run 2026-10-19):
   normalizer alone. Whisper's normalizer, used here, matches NVIDIA's model
   card (1.69% and 3.19%). Numbers here and the leaderboard's are not
   interchangeable; numbers within this repo are.
+- **Whisper turbo does not reproduce.** Scored the leaderboard's way, the MLX
+  run here is 0.6 and 0.2 points *better* than its published numbers. With the
+  scoring confirmed on Parakeet, that is the model run: `mlx-whisper` (greedy,
+  no previous-text conditioning) is not the inference setup the leaderboard
+  used. The engine comparison's Whisper numbers are therefore MLX Whisper's,
+  and if anything flattering to it.
 
 ## Parakeet
 
