@@ -27,10 +27,13 @@ enum ModelLocator {
 /// so nothing already typed is ever revised or deleted. Auto-stops on silence.
 final class Dictation {
     private let audio = AudioCapture()
-    private let session = StreamingSession()
+    private var session = StreamingSession()
     private var streamer: WhisperStreamer { session.streamer }
     private let processor = TextProcessor()
-    private var whisper: Whisper?
+    private var decoder: WordDecoder?
+    /// What actually loaded (the preferred engine, or Whisper as the fallback).
+    private(set) var engineName = ""
+    var onEngineLoaded: ((String) -> Void)?
 
     private var running = false
     private(set) var isRunning = false
@@ -47,25 +50,59 @@ final class Dictation {
     private var silenceMs: Int { Settings.shared.silenceMs }   // live-tunable in settings
     private let graceMs = 400
 
-    var isReady: Bool { whisper != nil }
+    var isReady: Bool { decoder != nil }
 
     // Load the model OFF the main thread: on a fresh build the Core ML encoder
     // compiles for the Neural Engine ("first run may take a while"), which would
     // otherwise block the UI and leave the window blank for seconds at launch.
-    init() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in self?.loadModel() }
+    init() { reload() }
+
+    /// (Re)load the engine chosen in Settings. Parakeet when it loads; Whisper
+    /// base.en (bundled, so it always can) if it doesn't — no network on first
+    /// launch, a broken model cache — so dictation is never unavailable. When
+    /// Parakeet isn't downloaded yet, Whisper serves while it downloads, and
+    /// Parakeet takes over once ready (never in the middle of a dictation).
+    private var reloadWhenStopped = false
+    private typealias Loaded = (decoder: WordDecoder, name: String, config: WhisperStreamer.Config)
+    private var pendingInstall: Loaded?
+
+    func reload() {
+        guard !isRunning else { reloadWhenStopped = true; return }
+        decoder = nil
+        let preferred = Settings.shared.engine
+        Task.detached(priority: .userInitiated) {
+            if preferred == .parakeet, !ParakeetDecoder.isDownloaded, let w = Dictation.loadWhisper() {
+                DispatchQueue.main.async { [weak self] in self?.install(w) }
+            }
+            let loaded = preferred == .parakeet ? (await Dictation.loadParakeet() ?? Dictation.loadWhisper())
+                                                : Dictation.loadWhisper()
+            DispatchQueue.main.async { [weak self] in if let loaded { self?.install(loaded) } }
+        }
     }
 
-    private func loadModel() {
-        guard let url = ModelLocator.baseEN() else { return }
-        let w = Whisper(fromFileURL: url, withParams: WhisperSetup.params(.shipped))
-        DispatchQueue.main.async { [weak self] in self?.whisper = w }
+    /// Swap the engine in, or hold it until the current dictation ends: the
+    /// running loop and its session belong to the engine they started with.
+    private func install(_ e: Loaded) {
+        guard !isRunning else { pendingInstall = e; return }
+        session = StreamingSession(config: e.config)
+        decoder = e.decoder; engineName = e.name
+        onEngineLoaded?(e.name)
+    }
+
+    private static func loadParakeet() async -> Loaded? {
+        guard let p = try? await ParakeetDecoder.load() else { return nil }
+        return (p, ParakeetDecoder.name, .parakeet)
+    }
+
+    private static func loadWhisper() -> Loaded? {
+        guard let url = ModelLocator.baseEN() else { return nil }
+        return (Whisper(fromFileURL: url, withParams: WhisperSetup.params(.shipped)), ModelLocator.name, .shipped)
     }
 
     func toggle() { isRunning ? stop() : start() }
 
     func start() {
-        guard whisper != nil, !isRunning else { return }
+        guard decoder != nil, !isRunning else { return }
         session.reset()
         processor.config = Settings.shared.textProcessorConfig()   // pick up live toggle/vocab changes
         processor.reset()
@@ -94,7 +131,7 @@ final class Dictation {
     }
 
     private func loop() async {
-        guard let whisper else { return }
+        guard let decoder else { return }
         var endpointer = SilenceEndpointer(tickMs: tickMs, graceMs: graceMs)
         let recordStart = Date()
         var maxTranscribeMs = 0, ticks = 0
@@ -107,7 +144,7 @@ final class Dictation {
             var quietest: Float?
             if full.count - startS >= StreamingSession.minWindowSamples {
                 let before = session.passes.count
-                if let words = try? await session.tick(audio: full, decoder: whisper) {
+                if let words = try? await session.tick(audio: full, decoder: decoder) {
                     let ops = processor.feed(words)
                     if !ops.isEmpty { emit(ops) }
                 }
@@ -131,7 +168,7 @@ final class Dictation {
         // which is exactly what Whisper hallucinates "thank you" etc. onto).
         let full = audio.snapshot()
         var finalOps: [TextOp] = []
-        if let words = try? await session.finish(audio: full, decoder: whisper) {
+        if let words = try? await session.finish(audio: full, decoder: decoder) {
             finalOps += processor.feed(words)
         }
         finalOps += processor.flush()          // emit any word held for lookahead
@@ -145,7 +182,11 @@ final class Dictation {
                        words: streamer.committedWords) { self.audio.rms(fromSec: $0, toSec: $1) }
         audio.stop()
         isRunning = false
-        await MainActor.run { self.onState?(false) }
+        await MainActor.run {
+            self.onState?(false)
+            if let e = self.pendingInstall { self.pendingInstall = nil; self.install(e) }
+            if self.reloadWhenStopped { self.reloadWhenStopped = false; self.reload() }
+        }
     }
 
     private func emit(_ ops: [TextOp]) {

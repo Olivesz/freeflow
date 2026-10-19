@@ -47,7 +47,7 @@ enum PauseBench {
         }
         let pauses = (arg("--pause") ?? "2").split(separator: ",").compactMap { Double($0) }
         let gains = (arg("--gains") ?? "1,0.12").split(separator: ",").compactMap { Float($0) }
-        let whisper = try SelfTest.loadWhisper(.shipped)
+        let whisper = try await SelfTest.loadDecoder(.shipped)
 
         var lines = ["clip,gain,pause_s,split_s,resume_s,speech_end_s,variant,outcome,stop_s,after_s,cut_after"]
         var tally: [String: [String: Int]] = [:]
@@ -114,7 +114,7 @@ enum PauseBench {
     /// Live replay: one tick per 350 ms of audio, both endpointers judging the
     /// same ticks exactly as Dictation.loop does. Returns each one's stop time.
     static func replay(_ audio: [Float], decoder whisper: WordDecoder) async throws -> [(String, Double?)] {
-        let session = StreamingSession()
+        let session = StreamingSession(config: SelfTest.configArg())
         var shipped = SilenceEndpointer(tickMs: SelfTest.tickMs, graceMs: graceMs,
                                         adaptive: false, holdOpenSentences: false)
         var current = SilenceEndpointer(tickMs: SelfTest.tickMs, graceMs: graceMs)

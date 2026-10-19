@@ -30,7 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         dictation.onFinished = { [weak self] text, audio in
-            self?.model.recordHistory(text, audio: audio)
+            guard let self else { return }
+            self.model.recordHistory(text, audio: audio, engine: self.dictation.engineName)
+        }
+        dictation.onEngineLoaded = { [weak self] name in self?.model.activeEngine = name }
+        model.activeEngine = dictation.engineName      // in case it loaded before the callback existed
+        model.onEngineChange = { [weak self] in
+            self?.model.activeEngine = ""
+            self?.dictation.reload()
         }
         dictation.onState = { [weak self] recording in
             guard let self else { return }

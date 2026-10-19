@@ -10,6 +10,7 @@ public enum TextOp: Equatable {
 
 /// Transforms the committed word stream on its way to the keyboard:
 ///   • filler removal ("um", "uh"…)                    — default on
+///   • stutter collapse ("the the", "with a with a")    — default on
 ///   • spoken formatting ("new line", "new paragraph")  — default on
 ///   • deletion command ("scratch that" / "delete that")— default on
 ///   • custom vocabulary correction (neuro → neural…)   — always
@@ -25,14 +26,18 @@ public enum TextOp: Equatable {
 public final class TextProcessor {
     public struct Config {
         public var filler = true
+        /// Drop an immediate repeat of the last 1-3 words. Parakeet types
+        /// disfluent speech verbatim, where Whisper used to drop it.
+        public var collapseRepeats = true
         public var commands = true
         public var punctuation = false
         public var autoCap = true
         public var vocab: [String: String] = [:]   // normalized key → replacement
 
-        public init(filler: Bool = true, commands: Bool = true, punctuation: Bool = false,
-                    autoCap: Bool = true, vocab: [String: String] = [:]) {
-            self.filler = filler; self.commands = commands; self.punctuation = punctuation
+        public init(filler: Bool = true, collapseRepeats: Bool = true, commands: Bool = true,
+                    punctuation: Bool = false, autoCap: Bool = true, vocab: [String: String] = [:]) {
+            self.filler = filler; self.collapseRepeats = collapseRepeats
+            self.commands = commands; self.punctuation = punctuation
             self.autoCap = autoCap; self.vocab = vocab
         }
     }
@@ -44,6 +49,9 @@ public final class TextProcessor {
     public static let fillerWords: Set<String> = [
         "um", "uh", "uhh", "uhm", "umm", "er", "err", "erm", "hmm", "mm", "mhm",
     ]
+    /// Doubles that are grammatical, never stutters: "I had had enough",
+    /// "I know that that is true".
+    public static let repeatExempt: Set<String> = ["had", "that"]
     public static let punctuationWords: [String: String] = [
         "period": ".", "comma": ",", "colon": ":", "semicolon": ";",
         "hyphen": "-", "dash": "—", "ellipsis": "…",
@@ -63,10 +71,12 @@ public final class TextProcessor {
     private var boundaries = [0]               // emitted-offsets where "scratch that" may stop
     private var emittedWords: [(start: Int, norm: String)] = []   // word spans, for multi-word vocab
     private var multiVocab: [(words: [String], replacement: String)] = []  // ≥2-word keys, longest first
+    /// Words held because they might begin a repeat of the last 1-3 words.
+    private var repeatHold: [(raw: String, pause: Bool)] = []
 
     public func reset() {
         pending = nil; pendingCmd = nil; suppressLeadingSpace = true; atSentenceStart = true
-        lastEnd = -1; emitted = ""; boundaries = [0]; emittedWords = []
+        lastEnd = -1; emitted = ""; boundaries = [0]; emittedWords = []; repeatHold = []
         // Split multi-word vocab keys out once per utterance (matched on Whisper's
         // OUTPUT words, which is what the user sees and corrects).
         multiVocab = config.vocab.compactMap { (k, v) -> (words: [String], replacement: String)? in
@@ -92,6 +102,7 @@ public final class TextProcessor {
         var ops: [TextOp] = []
         if let pc = pendingCmd { pendingCmd = nil; ops += emit(pc.phrase) }
         if let held = pending { pending = nil; ops += emitWord(held.text, pause: held.atStart) }
+        ops += drainRepeatHold()
         return coalesce(ops)
     }
 
@@ -168,6 +179,8 @@ public final class TextProcessor {
     }
 
     private func emit(_ phrase: Phrase) -> [TextOp] {
+        let held = drainRepeatHold()            // anything held was said before this phrase
+        guard held.isEmpty else { return held + emit(phrase) }
         switch phrase {
         case .newline:   return newline("\n")
         case .paragraph: return newline("\n\n")
@@ -200,7 +213,40 @@ public final class TextProcessor {
         return [.insert(p)]
     }
 
+    /// Stutter collapse in front of `emitWordNow`: a word that could begin a
+    /// repeat of the last 1-3 emitted words is held; if the repeat completes it
+    /// is dropped (nothing typed, nothing to backspace), and if it breaks the
+    /// held words are typed in order.
     private func emitWord(_ rawTok: String, pause: Bool) -> [TextOp] {
+        let key = norm(rawTok)
+        guard config.collapseRepeats, !key.isEmpty,
+              !(config.filler && Self.fillerWords.contains(key)),
+              !(config.punctuation && Self.punctuationWords[key] != nil)
+        else { return drainRepeatHold() + emitWordNow(rawTok, pause: pause) }
+
+        let probe = repeatHold.map { norm($0.raw) } + [key]
+        let recent = emittedWords.map(\.norm)
+        var couldRepeat = false
+        for n in 1...3 where recent.count >= n {
+            let prev = Array(recent.suffix(n))
+            if probe == prev, !(n == 1 && Self.repeatExempt.contains(key)) {
+                repeatHold = []
+                return []                                    // a full repeat: drop it
+            }
+            if probe.count < n, Array(prev.prefix(probe.count)) == probe { couldRepeat = true }
+        }
+        if couldRepeat { repeatHold.append((rawTok, pause)); return [] }
+        guard !repeatHold.isEmpty else { return emitWordNow(rawTok, pause: pause) }
+        return drainRepeatHold() + emitWord(rawTok, pause: pause)   // re-judge against what was typed
+    }
+
+    private func drainRepeatHold() -> [TextOp] {
+        let held = repeatHold
+        repeatHold = []
+        return held.flatMap { emitWordNow($0.raw, pause: $0.pause) }
+    }
+
+    private func emitWordNow(_ rawTok: String, pause: Bool) -> [TextOp] {
         if pause { markBoundary() }              // a real pause precedes this word → a place to stop deleting
         let key = norm(rawTok)
         if config.filler, Self.fillerWords.contains(key) { return [] }

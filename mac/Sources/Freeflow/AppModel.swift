@@ -73,11 +73,11 @@ final class AppModel: ObservableObject {
 
     /// Record a finished dictation into history (persisted + published), and
     /// keep its audio when the user opted in.
-    func recordHistory(_ text: String, audio: [Float]) {
+    func recordHistory(_ text: String, audio: [Float], engine: String) {
         guard let entry = HistoryStore.shared.add(text) else { return }
         history = HistoryStore.shared.entries
         if keepRecordings {
-            RecordingStore.shared.save(id: entry.id, audio: audio, typed: entry.text, model: ModelLocator.name)
+            RecordingStore.shared.save(id: entry.id, audio: audio, typed: entry.text, model: engine)
             recordingCount += 1
         }
     }
@@ -91,6 +91,14 @@ final class AppModel: ObservableObject {
         RecordingStore.shared.setCorrected(id: id, text: t)
         history = HistoryStore.shared.entries
     }
+
+    // MARK: Speech engine
+    @Published var engine = Settings.shared.engine {
+        didSet { guard engine != oldValue else { return }; Settings.shared.engine = engine; onEngineChange() }
+    }
+    /// The engine that actually loaded; "" while loading.
+    @Published var activeEngine = ""
+    var onEngineChange: () -> Void = {}
 
     // MARK: Recordings (opt-in tuning data)
     @Published var keepRecordings = Settings.shared.keepRecordings {

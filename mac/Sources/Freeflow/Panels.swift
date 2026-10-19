@@ -55,6 +55,17 @@ struct SetupPanel: View {
                         .foregroundStyle(Color.ffFaint).frame(width: 48, alignment: .trailing)
                 }
 
+                labeledRow("Speech model") {
+                    Picker("", selection: $model.engine) {
+                        Text("Parakeet").tag(Engine.parakeet)
+                        Text("Whisper").tag(Engine.whisper)
+                    }
+                    .pickerStyle(.segmented).labelsHidden().frame(width: 170)
+                }
+                Text(model.activeEngine.isEmpty ? "loading…" : "running: \(model.activeEngine)")
+                    .font(.system(size: 10)).foregroundStyle(Color.ffFaint)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
                 labeledRow("Launch at login") {
                     Toggle("", isOn: Binding(get: { model.launchAtLogin }, set: { model.setLaunch($0) }))
                         .labelsHidden().tint(Color.ffAccent)
@@ -62,7 +73,7 @@ struct SetupPanel: View {
 
                 Divider().overlay(.white.opacity(0.10)).padding(.vertical, 2)
 
-                featureToggle("Clean up filler", "drops “um”, “uh”, “er”", $model.fillerCleanup)
+                featureToggle("Clean up filler", "drops “um”, “uh” and stutters like “the the”", $model.fillerCleanup)
                 featureToggle("Voice commands", "“new line”, “new paragraph”, “scratch that”", $model.voiceCommands)
                 featureToggle("Auto-capitalize", "capitalize the start of sentences", $model.autoCapitalize)
                 featureToggle("Spoken punctuation", "say “period”, “comma”, “question mark”", $model.spokenPunctuation)

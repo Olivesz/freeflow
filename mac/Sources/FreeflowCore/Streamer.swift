@@ -42,6 +42,11 @@ public final class WhisperStreamer {
         // windows tried (4.9%, against 5.3-6.0% for 5/2, 8/2 and no trimming).
         // Before that fix every window lost words: 13.8-15.8% on the same clips.
         public static let shipped = Config(trimAfter: 3.0, context: 1.5)
+        // Parakeet's window, chosen the same way: 8 / 2 had the lowest dev WER
+        // of the bounded windows (2.7%, against 2.9% for 3 / 1.5 and 3.5% for
+        // 5 / 2), and keeps a typical pass under the model's 15 s input. No trimming
+        // scored 1.9%, but its passes grow with the dictation.
+        public static let parakeet = Config(trimAfter: 8.0, context: 2.0)
     }
 
     public let config: Config

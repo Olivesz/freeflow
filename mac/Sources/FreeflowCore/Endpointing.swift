@@ -158,3 +158,21 @@ public enum Decoding: String {
     case greedy, beam
     public static let shipped: Decoding = .greedy
 }
+
+/// When a decoder pass failed rather than heard nothing. FluidAudio's Core ML
+/// Parakeet v2 sometimes returns no tokens for clear speech, or a low-confidence
+/// loop ("The case of the case of the city of the"), depending on the window's
+/// length (FluidAudio #909; its own retry covers v3 only). Measured on failing
+/// windows: real decodes have mean token confidence 0.78-1.00, the garbage
+/// ones 0.14-0.16. A pass that fails this check is retried another way.
+public enum DecodeCheck {
+    public static let minConfidence: Float = 0.4
+
+    /// `confidences` are the pass's per-token confidences.
+    public static func failed(confidences: [Float], audio: [Float]) -> Bool {
+        if confidences.isEmpty {                       // blank: wrong only if there was speech
+            return audio.count >= 8000 && Audio.rms(audio) >= 0.003
+        }
+        return confidences.reduce(0, +) / Float(confidences.count) < minConfidence
+    }
+}

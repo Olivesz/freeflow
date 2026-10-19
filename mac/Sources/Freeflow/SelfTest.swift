@@ -3,13 +3,14 @@ import Foundation
 import FreeflowCore
 import SwiftWhisper
 
-/// Offline replays of a 16 kHz mono WAV through the real whisper.cpp model and
-/// the same StreamingSession the live app uses, at the app's 350 ms tick.
+/// Offline replays of a 16 kHz mono WAV through the real model and the same
+/// StreamingSession the live app uses, at the app's 350 ms tick.
 ///
 ///   Freeflow --selftest <wav>        per-tick deltas and the streamed result
 ///   Freeflow --selftest-proc <wav>   the same, piped through TextProcessor
-///   (either takes --beam, --trim <after>/<context> to override the window,
-///   and --tick <ms> to override the app's 350 ms tick)
+///   (either takes --engine parakeet|whisper, --beam for Whisper, --trim
+///   <after>/<context> to override the window, and --tick <ms> to override the
+///   app's 350 ms tick)
 enum SelfTest {
     static var tickMs: Int {
         guard let i = CommandLine.arguments.firstIndex(of: "--tick"), i + 1 < CommandLine.arguments.count,
@@ -37,17 +38,33 @@ enum SelfTest {
         CommandLine.arguments.contains("--beam") ? .beam : .shipped
     }
 
-    /// `--trim 3.0/1.5` overrides the shipped window; "none" disables trimming.
+    /// `--trim 3.0/1.5` overrides the engine's window; "none" disables trimming.
     static func configArg() -> WhisperStreamer.Config {
+        let engineDefault: WhisperStreamer.Config = engineArg() == .parakeet ? .parakeet : .shipped
         guard let i = CommandLine.arguments.firstIndex(of: "--trim"),
-              i + 1 < CommandLine.arguments.count else { return .shipped }
-        return parseConfig(CommandLine.arguments[i + 1]) ?? .shipped
+              i + 1 < CommandLine.arguments.count else { return engineDefault }
+        return parseConfig(CommandLine.arguments[i + 1]) ?? engineDefault
     }
 
     static func parseConfig(_ s: String) -> WhisperStreamer.Config? {
         if s == "none" { return WhisperStreamer.Config(trimAfter: .infinity, context: 0) }
         let parts = s.split(separator: "/").compactMap { Double($0) }
         return parts.count == 2 ? WhisperStreamer.Config(trimAfter: parts[0], context: parts[1]) : nil
+    }
+
+    /// `--engine whisper|parakeet`; the app's own default when absent.
+    static func engineArg() -> Engine {
+        let a = CommandLine.arguments
+        guard let i = a.firstIndex(of: "--engine"), i + 1 < a.count else { return .shipped }
+        return Engine(rawValue: a[i + 1]) ?? .shipped
+    }
+
+    /// The decoder the offline modes replay through, per `--engine`.
+    static func loadDecoder(_ decoding: Decoding) async throws -> WordDecoder {
+        switch engineArg() {
+        case .whisper: return try loadWhisper(decoding)
+        case .parakeet: return try await ParakeetDecoder.load()
+        }
     }
 
     static func loadWhisper(_ decoding: Decoding) throws -> Whisper {
@@ -86,10 +103,10 @@ enum SelfTest {
     private static func go(_ wavPath: String) async throws {
         let frames = try readWav(URL(fileURLWithPath: wavPath))
         print("audio: \(String(format: "%.1f", Double(frames.count) / 16000))s")
-        let whisper = try loadWhisper(decodingArg())
+        let decoder = try await loadDecoder(decodingArg())
         let session = StreamingSession(config: configArg())
         var assembled = "", ticks = 0
-        try await replay(frames, session: session, decoder: whisper) { t, words in
+        try await replay(frames, session: session, decoder: decoder) { t, words in
             let delta = words.map(\.text).joined()
             ticks += 1; assembled += delta
             print(String(format: "  t=%.2fs  +%@", t, "'\(delta)'"))
@@ -102,7 +119,7 @@ enum SelfTest {
     /// (filler/commands/vocab/auto-cap) and prints the exact text that would be typed.
     private static func goProc(_ wavPath: String) async throws {
         let frames = try readWav(URL(fileURLWithPath: wavPath))
-        let whisper = try loadWhisper(decodingArg())
+        let decoder = try await loadDecoder(decodingArg())
         let session = StreamingSession(config: configArg())
         var cfg = TextProcessor.Config()
         cfg.vocab = ["neuro": "neural", "gpt": "GPT",
@@ -118,7 +135,7 @@ enum SelfTest {
                 }
             }
         }
-        try await replay(frames, session: session, decoder: whisper) { _, words in
+        try await replay(frames, session: session, decoder: decoder) { _, words in
             raw += words.map(\.text).joined()
             all += words
             apply(proc.feed(words))

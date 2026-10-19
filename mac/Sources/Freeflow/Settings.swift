@@ -26,7 +26,7 @@ final class Settings {
         set { d.set(newValue, forKey: "mode") }
     }
     var silenceMs: Int {
-        get { d.object(forKey: "silenceMs") as? Int ?? 1500 }
+        get { d.object(forKey: "silenceMs") as? Int ?? 2500 }
         set { d.set(newValue, forKey: "silenceMs") }
     }
 
@@ -61,6 +61,13 @@ final class Settings {
         set { d.set(try? JSONEncoder().encode(newValue), forKey: "vocabJSON") }
     }
 
+    /// Speech engine. Parakeet unless the user picks Whisper; Whisper is also
+    /// the automatic fallback when Parakeet can't load.
+    var engine: Engine {
+        get { d.string(forKey: "engine").flatMap(Engine.init) ?? .shipped }
+        set { d.set(newValue.rawValue, forKey: "engine") }
+    }
+
     /// Opt-in: keep each dictation's audio locally as tuning/benchmark data.
     var keepRecordings: Bool {
         get { flag("keepRecordings", default: false) }
@@ -75,7 +82,7 @@ final class Settings {
 
     /// Builds the processor config from the current settings.
     func textProcessorConfig() -> TextProcessor.Config {
-        TextProcessor.Config(filler: fillerCleanup, commands: voiceCommands,
+        TextProcessor.Config(filler: fillerCleanup, collapseRepeats: fillerCleanup, commands: voiceCommands,
                              punctuation: spokenPunctuation, autoCap: autoCapitalize,
                              vocab: vocab)
     }

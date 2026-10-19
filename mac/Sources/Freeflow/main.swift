@@ -14,6 +14,10 @@ if CommandLine.arguments.contains("--pause-bench") {
     PauseBench.run()   // never returns
 }
 
+if CommandLine.arguments.contains("--vocab-bench") {
+    VocabBench.run()   // never returns
+}
+
 if let i = CommandLine.arguments.firstIndex(of: "--selftest-proc"),
    i + 1 < CommandLine.arguments.count {
     SelfTest.runProc(CommandLine.arguments[i + 1])   // never returns

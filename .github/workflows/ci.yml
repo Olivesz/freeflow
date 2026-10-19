@@ -19,7 +19,7 @@ jobs:
       - run: pytest -q
 
   swift:
-    runs-on: macos-14
+    runs-on: macos-15            # FluidAudio needs Swift tools 6.0 (Xcode 16)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -31,31 +31,48 @@ jobs:
         run: swift test
 
   # The real-model gate: replay the gate clips through the shipped streamer
-  # with whisper.cpp base.en and fail if streaming loses accuracy against
-  # offline decoding of the same clips (bench/gate.py). The control job runs
-  # the same gate with a 0.5 s window, which must fail, or the gate is not
-  # measuring anything. The three jobs run in parallel.
+  # with each engine and fail if streaming loses accuracy against offline
+  # decoding of the same clips (bench/gate.py). The control runs Whisper with
+  # a 0.5 s window, which must fail, or the gate is not measuring anything.
+  # Parakeet has no control: no window from 0.2 s to untrimmed takes it past
+  # the margin on these clips, so a broken-window run can't fail it, and the
+  # streamer, harness and gate it would test are the ones Whisper's control
+  # already does.
   gate:
-    runs-on: macos-14
-    timeout-minutes: 15
+    runs-on: macos-15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Parakeet is the shipped engine; Whisper is the fallback when it can't load.
           - run: ci-gate
+            engine: parakeet
             args: ""
             expect: pass
-          - run: ci-control
+          - run: ci-gate-whisper
+            engine: whisper
+            args: ""
+            expect: pass
+          - run: ci-control-whisper
+            engine: whisper
             args: "--trim 0.5/0.2"
             expect: fail
     name: gate (${{ matrix.run }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
+        if: matrix.engine == 'whisper'
         with:
           path: mac/Resources/ggml-base.en.bin
           key: ggml-base.en-a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002
-      - name: Fetch the model
+      - uses: actions/cache@v4
+        if: matrix.engine == 'parakeet'
+        with:
+          path: ~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2
+          key: parakeet-tdt-0.6b-v2-fluidaudio-503b4bd1bbf7220882de39fe8ae6716aae4132da
+      - name: Fetch the Whisper model
+        if: matrix.engine == 'whisper'
         run: mac/fetch_model.sh --no-encoder
       - name: Replay the gate clips
         env:
@@ -63,13 +80,21 @@ jobs:
           FREEFLOW_NO_ENCODER: "1"
           RUN: ${{ matrix.run }}
           ARGS: ${{ matrix.args }}
-        run: bench/run.sh "$RUN" $ARGS
+          ENGINE: ${{ matrix.engine }}
+        run: bench/run.sh "$RUN" --engine "$ENGINE" $ARGS
       - name: Check the result
         env:
           RUN: ${{ matrix.run }}
           EXPECT: ${{ matrix.expect }}
+          ENGINE: ${{ matrix.engine }}
         run: |
-          summary="bench/results/$(git rev-parse --short HEAD)/$RUN/summary.csv"
+          dir="bench/results/$(git rev-parse --short HEAD)/$RUN"
+          ran=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["engine"])' "$dir/run.json")
+          if [ "$ran" != "$ENGINE" ]; then
+            echo "asked for $ENGINE but the run used $ran" >&2
+            exit 1
+          fi
+          summary="$dir/summary.csv"
           if python3 bench/gate.py "$summary"; then result=pass; else result=fail; fi
           if [ "$result" != "$EXPECT" ]; then
             echo "expected the gate to $EXPECT on $RUN, but it did $result" >&2

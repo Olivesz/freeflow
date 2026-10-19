@@ -221,4 +221,39 @@ final class TextProcessorTests: XCTestCase {
     func testShippedDecodingIsGreedy() {
         XCTAssertEqual(Decoding.shipped, .greedy)
     }
+
+    // MARK: stutter collapse
+
+    func testSingleWordStutterIsDropped() {
+        XCTAssertEqual(stream(["the", "the", "cat", "sat"], on), "The cat sat")
+        XCTAssertEqual(stream(["i", "i", "think", "so"], on), "I think so")
+    }
+
+    func testTwoAndThreeWordRestartsAreDropped() {
+        XCTAssertEqual(stream(["round", "with", "a", "with", "a", "little", "logo"], on), "Round with a little logo")
+        XCTAssertEqual(stream(["it", "is", "a", "it", "is", "a", "cell"], on), "It is a cell")
+    }
+
+    func testGrammaticalDoublesSurvive() {
+        XCTAssertEqual(stream(["i", "had", "had", "enough"], on), "I had had enough")
+        XCTAssertEqual(stream(["i", "know", "that", "that", "works"], on), "I know that that works")
+    }
+
+    /// A held word whose repeat breaks is typed, in order, before what follows.
+    func testBrokenRepeatKeepsEveryWordInOrder() {
+        XCTAssertEqual(stream(["with", "a", "with", "the", "lid"], on), "With a with the lid")
+        XCTAssertEqual(stream(["go", "with", "a", "with"], on), "Go with a with")   // flush releases the hold
+    }
+
+    /// Words arrive tick by tick; the hold spans feed() calls.
+    func testRepeatSpanningTicks() {
+        for ticks in 1...5 {
+            XCTAssertEqual(stream(["for", "the", "for", "the", "volume"], on, ticks: ticks), "For the volume")
+        }
+    }
+
+    func testCollapseOffKeepsVerbatim() {
+        var c = on; c.collapseRepeats = false
+        XCTAssertEqual(stream(["the", "the", "cat"], c), "The the cat")
+    }
 }

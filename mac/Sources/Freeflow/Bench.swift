@@ -51,7 +51,7 @@ enum Bench {
         let decoding = SelfTest.decodingArg()
         let config = SelfTest.configArg()
         let loadStart = loadAverage()
-        let whisper = try SelfTest.loadWhisper(decoding)
+        let whisper = try await SelfTest.loadDecoder(decoding)
         let logs = out.appendingPathComponent("logs")
         try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
 
@@ -174,9 +174,12 @@ enum Bench {
             $0.deletingLastPathComponent().appendingPathComponent("ggml-base.en-encoder.mlmodelc").path
         }
         let info: [String: Any] = [
-            "model": "ggml-base.en.bin",
-            "model_sha256": model.flatMap { sha256($0) } ?? "missing",
-            "coreml_encoder": encoder.map { FileManager.default.fileExists(atPath: $0) } ?? false,
+            "engine": SelfTest.engineArg().rawValue,
+            "model": SelfTest.engineArg() == .parakeet ? ParakeetDecoder.name : "ggml-base.en.bin",
+            "model_sha256": SelfTest.engineArg() == .parakeet ? "fluidaudio-managed"
+                : model.flatMap { sha256($0) } ?? "missing",
+            "coreml_encoder": SelfTest.engineArg() == .parakeet
+                || encoder.map { FileManager.default.fileExists(atPath: $0) } ?? false,
             "decoding": decoding.rawValue,
             "trim_after_s": config.trimAfter.isFinite ? config.trimAfter : -1,
             "context_s": config.context,

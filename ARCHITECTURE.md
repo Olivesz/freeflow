@@ -10,21 +10,39 @@ reference for the streaming rule; both run the same fixtures.
 hotkey ─▶ AudioCapture ─▶ Dictation loop (every 350 ms)
           16 kHz mono       │
                             ├─ StreamingSession   skip < 0.5 s or silent windows, cut trailing silence
-                            ├─ whisper.cpp        base.en, greedy, one word per segment with times
+                            ├─ WordDecoder        Parakeet TDT 0.6B v2 (Core ML), or whisper.cpp base.en
                             ├─ WhisperStreamer    decide which words are stable
                             ├─ TextProcessor      fillers, voice commands, vocabulary, capitals
                             └─ TextInjector       synthetic key events into the focused app
-          SilenceEndpointer ends the utterance after the configured quiet
+          SilenceEndpointer ends the utterance after the configured quiet,
+                            longer while a sentence is still open
 ```
 
 Everything between the decoder and the keyboard lives in `FreeflowCore`, a
-library with no whisper.cpp or UI dependency, so `swift test` covers it with no
+library with no model or UI dependency, so `swift test` covers it with no
 model and no microphone. The app target (`mac/Sources/Freeflow`) adds the
-model, the audio, the menubar, the HUD, onboarding and settings.
+decoders, the audio, the menubar, the HUD, onboarding and settings.
+
+### The decoder (`WordDecoder`)
+
+Anything that turns a window of audio into timed words. Two ship:
+
+- **Parakeet TDT 0.6B v2** (NVIDIA, CC-BY-4.0), on the Neural Engine through
+  FluidAudio. The default. It is downloaded on first launch (about 450 MB);
+  until it is ready, and if it ever fails to load, Whisper serves instead, and
+  the swap waits for the current dictation to end.
+- **whisper.cpp `base.en`**, bundled with the app, so dictation always works
+  offline from the first launch.
+
+Parakeet decodes some input lengths as blank or as a low-confidence loop (an
+upstream bug in the Core ML port). `DecodeCheck` spots both, and the window
+is decoded again padded with silence to the model's full 15 s input, which
+decodes it correctly. Only failed windows are padded: padding every window
+costs accuracy.
 
 ### Stable words (`WhisperStreamer`)
 
-Every tick re-decodes the current window, and whisper.cpp may revise any word
+Every tick re-decodes the current window, and the decoder may revise any word
 in it. Typed text can't be revised, so a word is only typed once two
 consecutive passes agree on it (LocalAgreement-2).
 
@@ -38,23 +56,40 @@ because whisper.cpp occasionally reports a word ending tens of seconds past the
 audio.
 
 To keep each pass fast, the window is trimmed once enough committed audio piles
-up: it restarts a little before the last committed word (`Config.shipped`).
+up: it restarts a little before the last committed word. Whisper uses
+`Config.shipped` (3 / 1.5 s); Parakeet, which is faster per pass and more
+accurate with context, uses a longer one (`Config.parakeet`).
+
+### Ending an utterance (`SilenceEndpointer`)
+
+Speech is anything well above the room's noise floor, estimated from the
+quietest 50 ms frames of the last few seconds, so a quiet voice in a quiet room
+still counts and a noisy room never makes it stricter than a fixed threshold.
+When the transcript so far ends mid-sentence (no final punctuation, or a word
+like "and", "because", "the"), the silence allowed is tripled, so pausing to
+think doesn't cut the sentence off.
 
 ### Edits (`TextProcessor`)
 
 Turns committed words into `insert` and `delete` operations. It drops fillers,
 handles "new line", "new paragraph" and "scratch that", applies the custom
 vocabulary (including multi-word keys, by backspace and retype) and capitalises
-sentence starts. Deletes are bounded to what the current utterance typed, so it
+sentence starts. With filler cleanup on, a repeated word or short phrase ("the
+the", "we can we can") is typed once: the possible repeat is held back
+until the next word shows whether it was one, so nothing is backspaced. Deletes are bounded to what the current utterance typed, so it
 can never erase text that was in the field before.
 
-A command only fires when it is said on its own: Whisper ends it with a period
-or capitalises the next word. "Delete that file" stays literal.
+A command only fires when it is said on its own: the decoder ends it with a
+period or capitalises the next word. "Delete that file" stays literal.
 
 ### Around the loop
 
-- **Decoding is greedy.** Beam search makes whisper.cpp SIGTRAP on some audio;
-  `Decoding.shipped` is pinned and a test fails if it changes.
+- **Whisper decoding is greedy.** Beam search makes whisper.cpp SIGTRAP on
+  some audio; `Decoding.shipped` is pinned and a test fails if it changes.
+- **RecordingStore** (opt-in, off by default) keeps each dictation's audio on
+  the Mac. Confirming or fixing a transcript in History makes it a reference,
+  and `bench/personal.py` turns the reviewed ones into a private benchmark of
+  your own voice and vocabulary.
 - **CrashRelaunch** re-execs the app on a fatal signal so the hotkey never goes
   dead.
 - **HistoryStore** keeps the last 50 transcripts in Application Support.
@@ -70,7 +105,12 @@ or capitalises the next word. "Delete that file" stays literal.
 | `--selftest <wav>` | replays a clip through the live loop's rules and prints each tick's new words |
 | `--selftest-proc <wav>` | the same, through TextProcessor, printing the text that would be typed |
 | `--bench <manifest> --out <dir>` | the benchmark in `bench/` |
+| `--pause-bench <manifest> --out <csv>` | splices pauses into clips and counts where the endpointer would cut |
+| `--vocab-bench <manifest> <glossaries> --out <json>` | acoustic vocabulary boosting, scored against plain decoding |
 | `--render-ui <dir>` | snapshots the dashboard to PNG |
+
+The replay modes take `--engine parakeet|whisper` (default: the shipped
+engine) and `--trim <after>/<context>|none` (default: that engine's window).
 
 ## The Python app
 
