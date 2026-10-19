@@ -153,6 +153,30 @@ meetings, Earnings-22, VoxPopuli, LibriSpeech clean and other), taken by a
 fixed stride. `results.json` has every model's numbers by set; the audio and
 transcripts stay out of the repo.
 
+## Is the scorer right?
+
+Checked two ways that don't depend on this repo
+(`engines/crosscheck.py`, full LibriSpeech test sets, 2,620 + 2,939
+utterances, run 2026-10-19):
+
+| model | set | jiwer | NIST sclite | the leaderboard's own scoring | published |
+|---|---|---|---|---|---|
+| Parakeet TDT 0.6B v2 | test-clean | 1.69% | 1.70% | 1.27% | 1.28% |
+| Parakeet TDT 0.6B v2 | test-other | 3.22% | 3.20% | 2.77% | 2.73% |
+
+- **Against an independent implementation:** jiwer, which every score here
+  uses, and NIST SCTK's `sclite` agree within 0.02 points on the same
+  transcripts (alignment costs differ slightly).
+- **Against published numbers:** the Open ASR leaderboard
+  (`hf-audio/open-asr-leaderboard-results`, `english_short_latest.csv` at
+  `e85ed601`) reports 1.28% and 2.73%; scoring the same raw transcripts with
+  its own normalizer and compound-merging alignment (from
+  `huggingface/open_asr_leaderboard` at `25e0b9e1`) gives 1.27% and 2.77%. So
+  the transcripts match; the 0.4-point gap to this repo's numbers is the
+  normalizer alone. Whisper's normalizer, used here, matches NVIDIA's model
+  card (1.69% and 3.19%). Numbers here and the leaderboard's are not
+  interchangeable; numbers within this repo are.
+
 ## Parakeet
 
 At [`f589ce9`](https://github.com/Olivesz/freeflow/tree/f589ce9), with Parakeet TDT
