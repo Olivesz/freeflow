@@ -43,7 +43,6 @@ final class Dictation {
     private let tickMs = 350
     private var silenceMs: Int { Settings.shared.silenceMs }   // live-tunable in settings
     private let graceMs = 400
-    private let silenceFloor = StreamingSession.silenceFloor
 
     var isReady: Bool { whisper != nil }
 
@@ -93,7 +92,7 @@ final class Dictation {
 
     private func loop() async {
         guard let whisper else { return }
-        var endpointer = SilenceEndpointer(tickMs: tickMs, graceMs: graceMs, silenceFloor: silenceFloor)
+        var endpointer = SilenceEndpointer(tickMs: tickMs, graceMs: graceMs)
         let recordStart = Date()
         var maxTranscribeMs = 0, ticks = 0
 
@@ -102,6 +101,7 @@ final class Dictation {
             let full = audio.snapshot()
             let startS = streamer.windowStartSample()
             var level: Float?                               // nil = window too short to judge
+            var quietest: Float?
             if full.count - startS >= StreamingSession.minWindowSamples {
                 let before = session.passes.count
                 if let words = try? await session.tick(audio: full, decoder: whisper) {
@@ -112,8 +112,12 @@ final class Dictation {
                     maxTranscribeMs = max(maxTranscribeMs, Int(p.decodeMs)); ticks += 1
                 }
                 level = audio.recentRMS(ms: tickMs)
+                quietest = audio.recentQuietestRMS(ms: tickMs)
             }
-            if endpointer.tick(rms: level, silenceMs: silenceMs) { running = false }   // VAD auto-stop
+            if endpointer.tick(rms: level, quietest: quietest, silenceMs: silenceMs,
+                               sentenceOpen: session.sentenceOpen) {
+                running = false                             // VAD auto-stop
+            }
             let spent = Int(Date().timeIntervalSince(started) * 1000)
             if spent < tickMs {
                 try? await Task.sleep(nanoseconds: UInt64(tickMs - spent) * 1_000_000)

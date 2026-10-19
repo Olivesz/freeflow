@@ -1,4 +1,5 @@
 import AVFoundation
+import FreeflowCore
 
 /// Captures the mic and resamples to the 16 kHz mono float that whisper.cpp
 /// wants. The audio thread just appends into a locked buffer; the transcription
@@ -42,6 +43,13 @@ final class AudioCapture {
         let slice = samples[a..<b]
         let sum = slice.reduce(Float(0)) { $0 + $1 * $1 }
         return (sum / Float(b - a)).squareRoot()
+    }
+
+    /// RMS of the quietest 50 ms frame in the last `ms` — the room reference.
+    func recentQuietestRMS(ms: Int) -> Float {
+        lock.lock(); defer { lock.unlock() }
+        let n = min(samples.count, 16000 * ms / 1000)
+        return Audio.quietestFrameRMS(samples.suffix(n))
     }
 
     /// RMS of the last `ms` of captured audio — the VAD's raw signal.
