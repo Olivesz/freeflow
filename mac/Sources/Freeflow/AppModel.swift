@@ -71,10 +71,35 @@ final class AppModel: ObservableObject {
     /// Recent dictations, newest first (mirrors HistoryStore for the UI).
     @Published var history: [Dictation_Entry] = HistoryStore.shared.entries
 
-    /// Record a finished dictation into history (persisted + published).
-    func recordHistory(_ text: String) {
-        HistoryStore.shared.add(text)
+    /// Record a finished dictation into history (persisted + published), and
+    /// keep its audio when the user opted in.
+    func recordHistory(_ text: String, audio: [Float]) {
+        guard let entry = HistoryStore.shared.add(text) else { return }
         history = HistoryStore.shared.entries
+        if keepRecordings {
+            RecordingStore.shared.save(id: entry.id, audio: audio, typed: entry.text, model: ModelLocator.name)
+            recordingCount += 1
+        }
+    }
+
+    /// The user's fix for a dictation: what they actually said. Becomes the
+    /// reference for that recording.
+    func correct(_ id: UUID, to text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        HistoryStore.shared.setCorrected(id: id, text: t)
+        RecordingStore.shared.setCorrected(id: id, text: t)
+        history = HistoryStore.shared.entries
+    }
+
+    // MARK: Recordings (opt-in tuning data)
+    @Published var keepRecordings = Settings.shared.keepRecordings {
+        didSet { Settings.shared.keepRecordings = keepRecordings }
+    }
+    @Published var recordingCount = RecordingStore.shared.count
+    func deleteRecordings() {
+        RecordingStore.shared.deleteAll()
+        recordingCount = 0
     }
     func clearHistory() {
         HistoryStore.shared.clear()

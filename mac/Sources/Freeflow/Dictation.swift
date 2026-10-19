@@ -7,6 +7,8 @@ import SwiftWhisper
 /// the app bundle, else the copy the Python prototype already downloaded.
 /// whisper.cpp picks up the Core ML encoder from the same directory.
 enum ModelLocator {
+    static let name = "whisper.cpp ggml-base.en"
+
     static func baseEN() -> URL? {
         if let dir = ProcessInfo.processInfo.environment["FREEFLOW_MODEL_DIR"] {
             let u = URL(fileURLWithPath: dir).appendingPathComponent("ggml-base.en.bin")
@@ -37,8 +39,9 @@ final class Dictation {
     var onOps: (([TextOp]) -> Void)?
     var onState: ((Bool) -> Void)?
     var onLevel: ((Float) -> Void)?          // live mic loudness 0…1 (for UI reactivity)
-    /// Final transcript text when an utterance ends (for history). "" is skipped.
-    var onFinished: ((String) -> Void)?
+    /// Final transcript and the utterance audio when it ends (history, and
+    /// opt-in recordings). An empty transcript is skipped.
+    var onFinished: ((String, [Float]) -> Void)?
 
     private let tickMs = 350
     private var silenceMs: Int { Settings.shared.silenceMs }   // live-tunable in settings
@@ -135,7 +138,7 @@ final class Dictation {
         if !finalOps.isEmpty { emit(finalOps) }
 
         let finalText = processor.emitted.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !finalText.isEmpty { let t = finalText; await MainActor.run { self.onFinished?(t) } }
+        if !finalText.isEmpty { let t = finalText; await MainActor.run { self.onFinished?(t, full) } }
 
         Diag.utterance(fullSamples: full.count, wall: Date().timeIntervalSince(recordStart),
                        maxTranscribeMs: maxTranscribeMs, ticks: ticks,

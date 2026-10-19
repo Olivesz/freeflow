@@ -61,6 +61,12 @@ final class Settings {
         set { d.set(try? JSONEncoder().encode(newValue), forKey: "vocabJSON") }
     }
 
+    /// Opt-in: keep each dictation's audio locally as tuning/benchmark data.
+    var keepRecordings: Bool {
+        get { flag("keepRecordings", default: false) }
+        set { d.set(newValue, forKey: "keepRecordings") }
+    }
+
     /// False until the first-run onboarding has been completed/dismissed.
     var hasOnboarded: Bool {
         get { flag("hasOnboarded", default: false) }

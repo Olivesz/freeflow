@@ -29,8 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        dictation.onFinished = { [weak self] text in
-            self?.model.recordHistory(text)
+        dictation.onFinished = { [weak self] text, audio in
+            self?.model.recordHistory(text, audio: audio)
         }
         dictation.onState = { [weak self] recording in
             guard let self else { return }

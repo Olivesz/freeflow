@@ -66,6 +66,20 @@ struct SetupPanel: View {
                 featureToggle("Voice commands", "“new line”, “new paragraph”, “scratch that”", $model.voiceCommands)
                 featureToggle("Auto-capitalize", "capitalize the start of sentences", $model.autoCapitalize)
                 featureToggle("Spoken punctuation", "say “period”, “comma”, “question mark”", $model.spokenPunctuation)
+
+                Divider().overlay(.white.opacity(0.10)).padding(.vertical, 2)
+
+                featureToggle("Keep recordings for tuning",
+                              "audio stays on this Mac; fix a dictation in History to teach it",
+                              $model.keepRecordings)
+                if model.recordingCount > 0 {
+                    HStack {
+                        Text("\(model.recordingCount) saved").font(.system(size: 10)).foregroundStyle(Color.ffFaint)
+                        Spacer()
+                        Button("Delete all") { model.deleteRecordings() }
+                            .buttonStyle(.borderless).tint(Color.ffFaint).font(.system(size: 10))
+                    }
+                }
             }
             .padding(.vertical, 4)
         }
@@ -161,9 +175,12 @@ struct VocabPanel: View {
 
 // MARK: - History
 
-/// The last N dictations — recover or re-copy anything you lost.
+/// The last N dictations — recover or re-copy anything you lost, or fix what
+/// was misheard (the fix becomes that recording's reference for tuning).
 struct HistoryPanel: View {
     @ObservedObject var model: AppModel
+    @State private var editing: UUID?
+    @State private var draft = ""
 
     var body: some View {
         VStack(spacing: 8) {
@@ -187,17 +204,48 @@ struct HistoryPanel: View {
                     VStack(spacing: 6) {
                         ForEach(model.history) { entry in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(entry.text)
-                                    .font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
-                                    .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                                if editing == entry.id {
+                                    TextField("what you actually said", text: $draft, axis: .vertical)
+                                        .textFieldStyle(.plain).font(.system(size: 12))
+                                        .lineLimit(2...6)
+                                        .padding(6)
+                                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+                                        .onSubmit { save(entry.id) }
+                                } else {
+                                    Text(entry.corrected ?? entry.text)
+                                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.85))
+                                        .lineLimit(3).frame(maxWidth: .infinity, alignment: .leading)
+                                }
                                 HStack {
                                     Text(entry.date, style: .relative)
                                         .font(.system(size: 10)).foregroundStyle(Color.ffFaint)
                                     Text("ago").font(.system(size: 10)).foregroundStyle(Color.ffFaint)
+                                    if let c = entry.corrected {
+                                        Label(c == entry.text ? "confirmed" : "fixed", systemImage: "checkmark")
+                                            .font(.system(size: 10)).foregroundStyle(Color.ffAccent)
+                                    }
                                     Spacer()
-                                    Button { model.copyToClipboard(entry.text) } label: {
-                                        Image(systemName: "doc.on.doc")
-                                    }.buttonStyle(.plain).foregroundStyle(Color.ffAccent).font(.system(size: 11))
+                                    if editing == entry.id {
+                                        Button("Save") { save(entry.id) }
+                                            .buttonStyle(.borderless).tint(Color.ffAccent).font(.system(size: 11))
+                                        Button("Cancel") { editing = nil }
+                                            .buttonStyle(.borderless).tint(Color.ffFaint).font(.system(size: 11))
+                                    } else {
+                                        if entry.corrected == nil {
+                                            Button { model.correct(entry.id, to: entry.text) } label: {
+                                                Image(systemName: "checkmark.circle")
+                                            }.buttonStyle(.plain).foregroundStyle(Color.ffAccent).font(.system(size: 11))
+                                                .help("Looks right — counts as a correct transcript")
+                                        }
+                                        Button {
+                                            draft = entry.corrected ?? entry.text; editing = entry.id
+                                        } label: { Image(systemName: "pencil") }
+                                            .buttonStyle(.plain).foregroundStyle(Color.ffAccent).font(.system(size: 11))
+                                            .help("Fix what was misheard")
+                                        Button { model.copyToClipboard(entry.corrected ?? entry.text) } label: {
+                                            Image(systemName: "doc.on.doc")
+                                        }.buttonStyle(.plain).foregroundStyle(Color.ffAccent).font(.system(size: 11))
+                                    }
                                 }
                             }
                             .padding(10)
@@ -207,5 +255,10 @@ struct HistoryPanel: View {
                 }
             }
         }
+    }
+
+    private func save(_ id: UUID) {
+        model.correct(id, to: draft)
+        editing = nil
     }
 }
