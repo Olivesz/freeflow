@@ -1,0 +1,16 @@
+{
+  "clips" : 41,
+  "context_s" : 2,
+  "coreml_encoder" : true,
+  "cores" : 10,
+  "decoding" : "greedy",
+  "engine" : "parakeet",
+  "load_average_end" : 5.9740000000000002,
+  "load_average_start" : 7.3090000000000002,
+  "machine" : "Mac17,4, Apple M5",
+  "macos" : "Version 26.6.2 (Build 25G83)",
+  "model" : "parakeet-tdt-0.6b-v2 (Core ML)",
+  "model_sha256" : "fluidaudio-managed",
+  "tick_ms" : 350,
+  "trim_after_s" : 8
+}

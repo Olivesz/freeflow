@@ -1,16 +1,21 @@
 # Streaming benchmark
 
 Does streaming cost accuracy? Each clip is decoded twice with the same model
-(whisper.cpp `base.en`): once whole, offline, and once replayed at the app's
+(Parakeet TDT 0.6B v2 by default, or whisper.cpp `base.en` with
+`--engine whisper`): once whole, offline, and once replayed at the app's
 350 ms tick through the same `StreamingSession` the mac app runs. Both
 transcripts are scored against the reference.
+
+Also here: [`engines/`](engines/), the offline comparison that chose the model,
+and the pause benchmark, which measures where auto-stop cuts a dictation off.
 
 ## Run it
 
 ```bash
 mac/fetch_model.sh          # base.en + Core ML encoder, sha256-checked
-bench/run.sh                # the shipped settings, all 41 clips
-bench/run.sh beam --beam    # any other label + Freeflow --bench flags
+bench/run.sh                # the shipped settings, all 41 clips (Parakeet downloads on first use)
+bench/run.sh whisper --engine whisper
+bench/run.sh trim-none --trim none   # any other label + Freeflow --bench flags
 python3 bench/table.py bench/results/<commit>/<label>
 python3 bench/ticks.py bench/results/<commit>/<label>/logs/jfk.jsonl
 ```
@@ -130,3 +135,111 @@ identical to `80ec19e` and to `9832030/shipped`, which ran at load 8.
   regardless of decode time; live, a slow pass delays the next tick instead.
 - **CPU**: 1.65 CPU-seconds per second of audio, spread over whisper.cpp's
   threads, with the Core ML encoder loaded (`run.json`).
+
+## Choosing the model (`engines/`)
+
+Offline only, outside the app, through MLX:
+
+```bash
+python3.12 -m venv /tmp/asr && /tmp/asr/bin/pip install -r bench/engines/requirements.txt
+/tmp/asr/bin/python bench/engines/fetch_eval.py ~/asr-eval          # 125 clips, rebuilt deterministically
+/tmp/asr/bin/python bench/engines/eval_models.py ~/asr-eval \
+    parakeet:mlx-community/parakeet-tdt-0.6b-v2 whisper:mlx-community/whisper-large-v3-turbo
+/tmp/asr/bin/python bench/engines/table.py ~/asr-eval
+```
+
+25 clips of 4-20 s from each of five Open ASR leaderboard test sets (AMI
+meetings, Earnings-22, VoxPopuli, LibriSpeech clean and other), taken by a
+fixed stride. `results.json` has every model's numbers by set; the audio and
+transcripts stay out of the repo.
+
+## Parakeet
+
+At [`f589ce9`](https://github.com/Olivesz/freeflow/tree/f589ce9), with Parakeet TDT
+0.6B v2 on Core ML (FluidAudio) as the default engine. The window was chosen
+on the **dev** columns, the same way: 8 / 2 s has the lowest dev WER of the
+bounded windows. No trimming scored lower still, but a pass then decodes the
+whole dictation so far, and these clips are all under 20 s, so its cost on a
+long dictation is not measured here. Whisper's row is the same commit, for
+comparison; it matches `9832030`. These ran at load average 4-7 (`run.json`),
+so timing is an upper bound; CPU is process CPU, which leaves out the work the
+Neural Engine does for Parakeet.
+
+| run | window | tick | decoder | held-out: streamed / offline WER | dropped | dev: streamed / offline WER | dropped | all 41 clips: streamed / offline | commit lag p50 / p95 | CPU s per audio s |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `f589ce9/shipped` | 8 / 2 s | 350 ms | greedy | 2.1% / 1.9% | 2 of 523 | 2.7% / 1.0% | 0 of 513 | 2.4% / 1.4% | 669 / 1004 ms | 0.06 |
+| `f589ce9/trim-3.0-1.5` | 3 / 1.5 s | 350 ms | greedy | 3.6% / 1.9% | 5 of 523 | 2.9% / 1.0% | 0 of 513 | 3.3% / 1.4% | 660 / 1304 ms | 0.06 |
+| `f589ce9/trim-5.0-2.0` | 5 / 2 s | 350 ms | greedy | 3.3% / 1.9% | 2 of 523 | 3.5% / 1.0% | 0 of 513 | 3.4% / 1.4% | 671 / 1114 ms | 0.06 |
+| `f589ce9/trim-none` | none | 350 ms | greedy | 2.3% / 1.9% | 2 of 523 | 1.9% / 1.0% | 0 of 513 | 2.1% / 1.4% | 673 / 996 ms | 0.07 |
+| `f589ce9/whisper` | 3 / 1.5 s | 350 ms | greedy | 6.7% / 5.4% | 3 of 523 | 4.9% / 3.5% | 2 of 513 | 5.8% / 4.4% | 799 / 1571 ms | 1.75 |
+
+- **Accuracy.** Streaming Parakeet loses 0.2 points on held-out to its
+  own offline decoding, against 1.3 for Whisper, and its offline WER is a
+  third of Whisper's.
+- **Window.** Parakeet gains from context where Whisper didn't: 3 / 1.5 s is
+  the worst of its windows on held-out. It is fast enough per pass (median
+  46 ms) to afford 8 s.
+- **Blank decodes.** FluidAudio's Core ML Parakeet decodes some input lengths
+  as nothing, or as a low-confidence loop of a few tokens (FluidAudio #909;
+  its own recovery path covers v3 only, and v2 reproduced it here). `DecodeCheck` flags a pass that came back blank on audible speech or
+  averaged under 0.4 token confidence, and the window is decoded again padded
+  with silence to the model's full 15 s input, which decoded every failing
+  window tried. At 3 / 1.5 s this took streamed WER on all 41 clips from 6.0%
+  (24 words dropped) to 3.3% (5 dropped); at 8 / 2 s blank passes are rare
+  and the retry changes little (2.3% to 2.4%). Padding every pass instead
+  costs accuracy everywhere: offline WER went from 1.4% to 2.0%.
+- **No control for Parakeet in CI.** The gate's control run uses a broken
+  window that must fail. Parakeet passes the gate at every window tried,
+  down to 0.2 s with no context (2.5% against 0.8% offline on the gate
+  clips), and with the retry off, so CI's control runs on Whisper, which
+  covers the same streamer, harness and gate.
+
+## Pause benchmark
+
+`Freeflow --pause-bench bench/manifest.json --out <csv> --silence <ms>`
+splices a pause (2 s, or `--pause 1,2,3`) into each clip between the two
+words nearest its middle, never right after a sentence end, so the speaker
+is mid-sentence. It pads 6 s of room noise after the speech, and
+replays it tick by tick through two endpointers judging the same passes: the
+old fixed-threshold one and the shipped one. Each replay is scored **cut**
+(stopped during the pause, losing the rest), **late** (stopped during the
+speech after it), **ok** (stopped after the speech ended) or **open** (still
+listening 6 s after the speech). `--gains 1,0.12` replays each clip at its
+own level and at 12%, a quiet voice or a far mic.
+
+A 2 s mid-sentence pause, auto-stop at 2.5 s, 41 clips per row:
+
+| engine | level | endpointer | cut | late | ok | open |
+|---|---|---|---|---|---|---|
+| Parakeet | full | fixed threshold, no hold | 1 | 0 | 40 | 0 |
+| Parakeet | full | **shipped** | 1 | 0 | 38 | 2 |
+| Parakeet | 12% | fixed threshold, no hold | 13 | 10 | 18 | 0 |
+| Parakeet | 12% | **shipped** | 4 | 4 | 30 | 3 |
+| Whisper | full | fixed threshold, no hold | 0 | 0 | 41 | 0 |
+| Whisper | full | **shipped** | 0 | 0 | 41 | 0 |
+| Whisper | 12% | fixed threshold, no hold | 14 | 8 | 19 | 0 |
+| Whisper | 12% | **shipped** | 7 | 2 | 30 | 2 |
+
+At full level a 2 s pause is under the 2.5 s timeout, so both endpointers
+mostly wait it out. A quiet voice is where the old one failed: under its fixed
+threshold, speech counted as silence, and it cut off a third of the clips.
+The shipped one judges speech against the room's noise floor and waits three
+times as long on an unfinished sentence; "open" is that hold outlasting the 6 s
+of tail, because the last word decoded as one that can't end a sentence or
+with a comma: a slow stop, but nothing lost.
+
+The hold first keyed on a missing period too, which Parakeet broke: the
+window's trailing silence is cut before each pass, so it leaves the last word
+of a finished sentence bare, and 24 of 41 full-level replays never stopped
+(fixed in [`f589ce9`](https://github.com/Olivesz/freeflow/commit/f589ce9)).
+
+## Vocabulary boosting
+
+`Freeflow --vocab-bench` rescored Parakeet's output with FluidAudio's CTC
+keyword spotter (110M) on the engine set's meeting and earnings-call clips,
+each given a 20-term glossary: the clip's own rare words plus distractors
+from other clips. It raised recall of the clip's words (meetings 87.8% to
+94.9%, earnings calls 93.8% to 96.9%) but raised WER (9.2% to 11.1%, 7.2% to
+9.3%), and typed 20 distractors that were never said, where plain decoding
+typed none. Corrections stay in the Words tab, which changes only what you
+told it to.

@@ -1,0 +1,9 @@
+# Engine comparison only (Apple silicon, MLX); the app doesn't need any of this.
+datasets==3.6.0
+jiwer==4.0.0
+librosa==1.0.0
+mlx-whisper==0.4.3
+numpy==2.5.4
+parakeet-mlx==0.5.3
+soundfile==0.14.0
+whisper_normalizer==0.1.15
