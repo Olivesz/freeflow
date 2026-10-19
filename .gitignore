@@ -20,3 +20,6 @@ xcuserdata/
 ggml-*.bin
 *.part
 mac/Resources/ggml-base.en-encoder.sha256
+
+# NIST SCTK, built by bench/tools/get_sctk.sh
+bench/tools/sctk-src/

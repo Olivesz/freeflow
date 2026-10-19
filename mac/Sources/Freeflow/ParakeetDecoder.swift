@@ -18,12 +18,14 @@ enum Engine: String, CaseIterable {
 /// Parliament, LibriSpeech): about 45% fewer misheard words than base.en, the
 /// same as large-v3-turbo but ~3x faster per window, and it doesn't invent
 /// text on silence the way Whisper does.
-final class ParakeetDecoder: WordDecoder {
+final class ParakeetDecoder: WordDecoder, TokenReporting {
     static let version: AsrModelVersion = .v2
     static let name = "parakeet-tdt-0.6b-v2 (Core ML)"
     private static let minSamples = 4800            // FluidAudio's 0.3 s floor
 
     private let manager: AsrManager
+    private(set) var lastTokens: [TokenRecord] = []
+    private(set) var lastRetried = false
 
     private init(manager: AsrManager) { self.manager = manager }
 
@@ -43,9 +45,33 @@ final class ParakeetDecoder: WordDecoder {
 
     func words(_ frames: [Float]) async throws -> [Word] {
         let result = try await transcribe(frames)
-        return buildWordTimings(from: result.tokenTimings ?? []).map {
-            Word(text: $0.word, start: $0.startTime, end: $0.endTime)
+        let tokens = result.tokenTimings ?? []
+        lastTokens = tokens.map { TokenRecord(text: $0.token, start: $0.startTime, end: $0.endTime,
+                                              confidence: $0.confidence) }
+        return Self.words(tokens)
+    }
+
+    /// FluidAudio's `buildWordTimings`, keeping the lowest token confidence
+    /// of each word.
+    static func words(_ tokens: [TokenTiming]) -> [Word] {
+        var out: [Word] = []
+        var text = "", start = 0.0, end = 0.0, conf: Float = 1
+        func flush() {
+            let t = text.trimmingCharacters(in: .whitespaces)
+            if !t.isEmpty { out.append(Word(text: t, start: start, end: end, confidence: conf)) }
         }
+        for tk in tokens where !(tk.token.isEmpty || tk.token == "<blank>" || tk.token == "<pad>") {
+            let newWord = isWordBoundary(tk.token) || text.isEmpty
+            if newWord {
+                flush()
+                text = stripWordBoundaryPrefix(tk.token); start = tk.startTime; conf = tk.confidence
+            } else {
+                text += tk.token; conf = min(conf, tk.confidence)
+            }
+            end = tk.endTime
+        }
+        flush()
+        return out
     }
 
     /// The full FluidAudio result for one window (text, token timings).
@@ -57,8 +83,10 @@ final class ParakeetDecoder: WordDecoder {
     /// the two. Padding every window instead would cost accuracy on all of
     /// them (offline WER 1.4% -> 2.0% on the benchmark clips).
     func transcribe(_ frames: [Float]) async throws -> ASRResult {
+        lastRetried = false
         let first = try await decode(frames, padTo: Self.minSamples)
         guard DecodeCheck.failed(confidences: Self.confidences(first), audio: frames) else { return first }
+        lastRetried = true
         let retry = try await decode(frames, padTo: ASRConstants.maxModelSamples)
         return Self.mean(Self.confidences(retry)) > Self.mean(Self.confidences(first)) ? retry : first
     }

@@ -1,10 +1,11 @@
 import AVFoundation
+import CoreAudio
 import FreeflowCore
 
 /// Captures the mic and resamples to the 16 kHz mono float that whisper.cpp
 /// wants. The audio thread just appends into a locked buffer; the transcription
 /// loop takes `snapshot()`s of it.
-final class AudioCapture {
+final class AudioCapture: AudioSource {
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private let target = AVAudioFormat(commonFormat: .pcmFormatFloat32,
@@ -60,6 +61,22 @@ final class AudioCapture {
         let slice = samples.suffix(n)
         let sum = slice.reduce(Float(0)) { $0 + $1 * $1 }
         return (sum / Float(n)).squareRoot()
+    }
+
+    /// The default input device's name, as System Settings shows it.
+    var deviceName: String {
+        var id = AudioDeviceID(0), size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice,
+                                              mScope: kAudioObjectPropertyScopeGlobal,
+                                              mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &id) == noErr
+        else { return "unknown" }
+        var name: Unmanaged<CFString>?
+        size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        addr.mSelector = kAudioObjectPropertyName
+        guard AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &name) == noErr, let n = name
+        else { return "unknown" }
+        return n.takeRetainedValue() as String
     }
 
     private func append(_ buffer: AVAudioPCMBuffer) {

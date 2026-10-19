@@ -14,6 +14,10 @@ if CommandLine.arguments.contains("--pause-bench") {
     PauseBench.run()   // never returns
 }
 
+if CommandLine.arguments.contains("--e2e") {
+    E2E.run()   // never returns
+}
+
 if CommandLine.arguments.contains("--vocab-bench") {
     VocabBench.run()   // never returns
 }

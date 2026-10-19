@@ -5,9 +5,12 @@ public struct Word: Equatable {
     public let text: String   // raw, with a leading space (join-ready) for English
     public let start: Double  // seconds
     public let end: Double
+    /// The decoder's confidence in the word (lowest of its tokens), when it
+    /// reports one. Logged for error analysis; no rule reads it.
+    public let confidence: Float?
 
-    public init(text: String, start: Double, end: Double) {
-        self.text = text; self.start = start; self.end = end
+    public init(text: String, start: Double, end: Double, confidence: Float? = nil) {
+        self.text = text; self.start = start; self.end = end; self.confidence = confidence
     }
 }
 
@@ -104,7 +107,7 @@ public final class WhisperStreamer {
             guard !isNonSpeech(w.text) else { return nil }
             let end = min(max(w.end, 0), limit), start = min(max(w.start, 0), end)
             return Word(text: " " + w.text.trimmingCharacters(in: .whitespaces),
-                        start: start + offset, end: end + offset)
+                        start: start + offset, end: end + offset, confidence: w.confidence)
         }
     }
 

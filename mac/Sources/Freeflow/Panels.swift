@@ -81,7 +81,7 @@ struct SetupPanel: View {
                 Divider().overlay(.white.opacity(0.10)).padding(.vertical, 2)
 
                 featureToggle("Keep recordings for tuning",
-                              "audio stays on this Mac; fix a dictation in History to teach it",
+                              "audio, timings and your later edits stay on this Mac",
                               $model.keepRecordings)
                 if model.recordingCount > 0 {
                     HStack {

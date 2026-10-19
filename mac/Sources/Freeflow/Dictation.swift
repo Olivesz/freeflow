@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import FreeflowCore
@@ -26,8 +27,12 @@ enum ModelLocator {
 /// (trimmed) audio window and injects only the newly-stable words — append-only,
 /// so nothing already typed is ever revised or deleted. Auto-stops on silence.
 final class Dictation {
-    private let audio = AudioCapture()
+    private let audio: AudioSource
+    /// Set by the --e2e harness: run this engine whatever Settings say, and
+    /// never stand Whisper in for it.
+    private let pinnedEngine: Engine?
     private var session = StreamingSession()
+    private var config: WhisperStreamer.Config = .shipped
     private var streamer: WhisperStreamer { session.streamer }
     private let processor = TextProcessor()
     private var decoder: WordDecoder?
@@ -42,12 +47,20 @@ final class Dictation {
     var onOps: (([TextOp]) -> Void)?
     var onState: ((Bool) -> Void)?
     var onLevel: ((Float) -> Void)?          // live mic loudness 0…1 (for UI reactivity)
-    /// Final transcript and the utterance audio when it ends (history, and
-    /// opt-in recordings). An empty transcript is skipped.
-    var onFinished: ((String, [Float]) -> Void)?
+    /// The whole dictation when it ends: what was typed, the audio, every pass,
+    /// tick and edit (history, and the opt-in session log). Called even when
+    /// nothing was typed: an empty dictation is data too.
+    var onFinished: ((SessionTrace) -> Void)?
+    /// "toggle" or "hold" (the hotkey mode), "e2e" in the harness.
+    var trigger = "toggle"
+    /// Harness overrides; nil means Settings.
+    var silenceOverrideMs: Int?
+    var processorOverride: TextProcessor.Config?
+    var appOverride: String?
+    private var trace: SessionTrace?
 
     private let tickMs = 350
-    private var silenceMs: Int { Settings.shared.silenceMs }   // live-tunable in settings
+    private var silenceMs: Int { silenceOverrideMs ?? Settings.shared.silenceMs }   // live-tunable in settings
     private let graceMs = 400
 
     var isReady: Bool { decoder != nil }
@@ -55,7 +68,10 @@ final class Dictation {
     // Load the model OFF the main thread: on a fresh build the Core ML encoder
     // compiles for the Neural Engine ("first run may take a while"), which would
     // otherwise block the UI and leave the window blank for seconds at launch.
-    init() { reload() }
+    init(audio: AudioSource = AudioCapture(), engine: Engine? = nil) {
+        self.audio = audio; pinnedEngine = engine
+        reload()
+    }
 
     /// (Re)load the engine chosen in Settings. Parakeet when it loads; Whisper
     /// base.en (bundled, so it always can) if it doesn't — no network on first
@@ -69,8 +85,13 @@ final class Dictation {
     func reload() {
         guard !isRunning else { reloadWhenStopped = true; return }
         decoder = nil
-        let preferred = Settings.shared.engine
+        let preferred = pinnedEngine ?? Settings.shared.engine, pinned = pinnedEngine != nil
         Task.detached(priority: .userInitiated) {
+            if pinned {
+                let loaded = preferred == .parakeet ? await Dictation.loadParakeet() : Dictation.loadWhisper()
+                DispatchQueue.main.async { [weak self] in if let loaded { self?.install(loaded) } }
+                return
+            }
             if preferred == .parakeet, !ParakeetDecoder.isDownloaded, let w = Dictation.loadWhisper() {
                 DispatchQueue.main.async { [weak self] in self?.install(w) }
             }
@@ -85,6 +106,7 @@ final class Dictation {
     private func install(_ e: Loaded) {
         guard !isRunning else { pendingInstall = e; return }
         session = StreamingSession(config: e.config)
+        config = e.config
         decoder = e.decoder; engineName = e.name
         onEngineLoaded?(e.name)
     }
@@ -106,7 +128,12 @@ final class Dictation {
         session.reset()
         processor.config = Settings.shared.textProcessorConfig()   // pick up live toggle/vocab changes
         processor.reset()
-        do { try audio.start() } catch { return }
+        let t = SessionTrace(engine: engineName, config: config, silenceMs: silenceMs, tickMs: tickMs,
+                             device: audio.deviceName)
+        t.trigger = trigger
+        t.app = appOverride ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        trace = t
+        do { try audio.start() } catch { trace = nil; return }
         running = true; isRunning = true
         onState?(true)
         Task.detached(priority: .userInitiated) { [weak self] in await self?.loop() }
@@ -131,7 +158,7 @@ final class Dictation {
     }
 
     private func loop() async {
-        guard let decoder else { return }
+        guard let decoder, let trace else { return }
         var endpointer = SilenceEndpointer(tickMs: tickMs, graceMs: graceMs)
         let recordStart = Date()
         var maxTranscribeMs = 0, ticks = 0
@@ -150,13 +177,22 @@ final class Dictation {
                 }
                 if session.passes.count > before, let p = session.passes.last {
                     maxTranscribeMs = max(maxTranscribeMs, Int(p.decodeMs)); ticks += 1
+                    record(p, decoder)
                 }
                 level = audio.recentRMS(ms: tickMs)
                 quietest = audio.recentQuietestRMS(ms: tickMs)
             }
-            if endpointer.tick(rms: level, quietest: quietest, silenceMs: silenceMs,
-                               sentenceOpen: session.sentenceOpen) {
+            let open = session.sentenceOpen
+            let stopNow = endpointer.tick(rms: level, quietest: quietest, silenceMs: silenceMs,
+                                          sentenceOpen: open)
+            trace.ticks.append(.init(t: trace.now, audioEnd: Double(full.count) / 16000,
+                                     rms: level, quietest: quietest, noiseFloor: endpointer.noiseFloor,
+                                     voiced: level != nil && endpointer.lastVoiced,
+                                     silentMs: endpointer.silentMs, limitMs: endpointer.lastLimitMs,
+                                     sentenceOpen: open, stop: stopNow))
+            if stopNow {
                 running = false                             // VAD auto-stop
+                trace.stopReason = .auto
             }
             let spent = Int(Date().timeIntervalSince(started) * 1000)
             if spent < tickMs {
@@ -168,14 +204,19 @@ final class Dictation {
         // which is exactly what Whisper hallucinates "thank you" etc. onto).
         let full = audio.snapshot()
         var finalOps: [TextOp] = []
+        let before = session.passes.count
         if let words = try? await session.finish(audio: full, decoder: decoder) {
             finalOps += processor.feed(words)
         }
+        if session.passes.count > before, let p = session.passes.last { record(p, decoder) }
         finalOps += processor.flush()          // emit any word held for lookahead
         if !finalOps.isEmpty { emit(finalOps) }
 
-        let finalText = processor.emitted.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !finalText.isEmpty { let t = finalText; await MainActor.run { self.onFinished?(t, full) } }
+        trace.typed = processor.emitted
+        trace.audio = full
+        trace.ended = Date()
+        self.trace = nil
+        await MainActor.run { self.onFinished?(trace) }
 
         Diag.utterance(fullSamples: full.count, wall: Date().timeIntervalSince(recordStart),
                        maxTranscribeMs: maxTranscribeMs, ticks: ticks,
@@ -190,7 +231,14 @@ final class Dictation {
     }
 
     private func emit(_ ops: [TextOp]) {
+        if let trace { let t = trace.now; trace.ops += ops.map { .init(t: t, op: $0) } }
         DispatchQueue.main.async { self.onOps?(ops) }
+    }
+
+    private func record(_ p: Pass, _ decoder: WordDecoder) {
+        guard let trace else { return }
+        let r = decoder as? TokenReporting
+        trace.passes.append(.init(t: trace.now, pass: p, tokens: r?.lastTokens ?? [], retried: r?.lastRetried ?? false))
     }
 }
 

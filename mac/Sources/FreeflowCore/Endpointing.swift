@@ -74,6 +74,10 @@ public struct SilenceEndpointer {
     public private(set) var elapsedMs = 0
     public private(set) var silentMs = 0
     public private(set) var speaking = false
+    /// What the last tick decided, for the session log: whether it was heard
+    /// as speech, and how much silence it took to stop at that moment.
+    public private(set) var lastVoiced = false
+    public private(set) var lastLimitMs = 0
     private var recent: [Float] = []
 
     /// Quietest tick of the last ~4 s: the room, not the speech.
@@ -99,7 +103,9 @@ public struct SilenceEndpointer {
             silentMs = voiced ? 0 : silentMs + tickMs
         }
         let hold = holdOpenSentences && sentenceOpen
-        return silentMs >= (hold ? silenceMs * Self.openSentenceFactor : silenceMs)
+        lastVoiced = voiced
+        lastLimitMs = hold ? silenceMs * Self.openSentenceFactor : silenceMs
+        return silentMs >= lastLimitMs
     }
 
     /// Speech gate: the legacy fixed floor, or clearly above the room (with

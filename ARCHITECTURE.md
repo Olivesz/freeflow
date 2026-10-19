@@ -88,10 +88,15 @@ period or capitalises the next word. "Delete that file" stays literal.
 
 - **Whisper decoding is greedy.** Beam search makes whisper.cpp SIGTRAP on
   some audio; `Decoding.shipped` is pinned and a test fails if it changes.
-- **RecordingStore** (opt-in, off by default) keeps each dictation's audio on
-  the Mac. Confirming or fixing a transcript in History makes it a reference,
-  and `bench/personal.py` turns the reviewed ones into a private benchmark of
-  your own voice and vocabulary.
+- **SessionLog** (opt-in, off by default) keeps every dictation on the Mac:
+  its audio and a SQLite record of each decoder pass (tokens and confidences),
+  each endpointer tick, each edit typed and how it stopped. `Dictation` builds
+  the record as a `SessionTrace`. Confirming or fixing a transcript in History
+  makes it the session's reference.
+- **CorrectionWatcher** reads the field back through Accessibility 90 s after
+  a dictation (or when the next one starts) and logs what the dictated span
+  became, never the rest of the field and never a password field; the match
+  is `CorrectionTrail` in FreeflowCore. `bench/voice/` analyses the log.
 - **CrashRelaunch** re-execs the app on a fatal signal so the hotkey never goes
   dead.
 - **HistoryStore** keeps the last 50 transcripts in Application Support.
@@ -107,6 +112,7 @@ period or capitalises the next word. "Delete that file" stays literal.
 | `--selftest <wav>` | replays a clip through the live loop's rules and prints each tick's new words |
 | `--selftest-proc <wav>` | the same, through TextProcessor, printing the text that would be typed |
 | `--bench <manifest> --out <dir>` | the benchmark in `bench/` |
+| `--e2e <manifest> --out <dir> [--db <dir>]` | plays clips on the wall clock through the real `Dictation` loop (all but mic and keyboard), with latency, auto-stop and cut-offs; `--db` writes a session log |
 | `--pause-bench <manifest> --out <csv>` | splices pauses into clips and counts where the endpointer would cut |
 | `--vocab-bench <manifest> <glossaries> --out <json>` | acoustic vocabulary boosting, scored against plain decoding |
 | `--render-ui <dir>` | snapshots the dashboard to PNG |

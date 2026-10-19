@@ -8,7 +8,9 @@ corpus WER per dataset and overall, split into substitutions (misheard words),
 deletions and insertions. Also times one pass over a 3 s window, which is what
 the app pays every 350 ms tick. Runs through MLX on the GPU, not the app's
 Core ML path, so the times compare models with each other, not with the app.
-Writes <eval_dir>/results/<model>.json, transcripts included.
+Writes <eval_dir>/results/<model>.json, transcripts included: normalized in
+"hyps", as the model wrote them in "raw" (for scoring with another
+normalizer, as crosscheck.py does).
 """
 import json, sys, time, pathlib, statistics
 import numpy as np, soundfile as sf, jiwer
@@ -44,11 +46,12 @@ for spec in sys.argv[2:]:
     run = loader(spec)
     wav0 = sf.read(EVAL / clips[0]["path"], dtype="float32")[0]
     run(wav0)                                   # warm-up: load weights, compile
-    refs, hyps, per_set, audio_s, decode_s = [], [], {}, 0.0, 0.0
+    refs, hyps, raws, per_set, audio_s, decode_s = [], [], [], {}, 0.0, 0.0
     for c in clips:
         x = sf.read(EVAL / c["path"], dtype="float32")[0]
         t = time.perf_counter(); h = run(x); decode_s += time.perf_counter() - t
         audio_s += len(x) / 16000
+        raws.append(h)
         r, h = norm(c["text"]), norm(h)
         refs.append(r); hyps.append(h)
         per_set.setdefault(c["set"], ([], []))
@@ -72,6 +75,7 @@ for spec in sys.argv[2:]:
         "rtfx": round(audio_s / decode_s, 1),
         "pass_3s_ms_median": round(statistics.median(passes), 1),
         "hyps": {c["id"]: h for c, h in zip(clips, hyps)},
+        "raw": {c["id"]: h for c, h in zip(clips, raws)},
     }
     r = results[spec]
     print(f"{spec}: WER {r['wer_all']}%  RTFx {r['rtfx']}  3s-pass {r['pass_3s_ms_median']} ms  {r['wer_by_set']}", flush=True)

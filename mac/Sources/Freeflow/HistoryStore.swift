@@ -27,10 +27,10 @@ final class HistoryStore {
     }
 
     @discardableResult
-    func add(_ text: String) -> Dictation_Entry? {
+    func add(_ text: String, id: UUID = UUID()) -> Dictation_Entry? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let entry = Dictation_Entry(text: trimmed, date: Date())
+        let entry = Dictation_Entry(id: id, text: trimmed, date: Date())
         entries.insert(entry, at: 0)
         if entries.count > cap { entries = Array(entries.prefix(cap)) }
         save()

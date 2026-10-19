@@ -4,6 +4,7 @@ import FreeflowCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let dictation = Dictation()
+    private let watcher = CorrectionWatcher(log: .shared)
     private let hotKey = HotKey()
     private let model = AppModel()
     private var mainWindow: MainWindowController!
@@ -29,9 +30,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-        dictation.onFinished = { [weak self] text, audio in
+        dictation.onFinished = { [weak self] trace in
             guard let self else { return }
-            self.model.recordHistory(text, audio: audio, engine: self.dictation.engineName)
+            self.model.recordHistory(trace)
+            if self.model.keepRecordings { self.watcher.watch(trace) }
         }
         dictation.onEngineLoaded = { [weak self] name in self?.model.activeEngine = name }
         model.activeEngine = dictation.engineName      // in case it loaded before the callback existed
@@ -44,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.setIcon(recording: recording)
             self.model.recording = recording
             if recording {
+                self.watcher.dictationStarted()
                 self.hudHide?.cancel()
                 self.model.statusFlash = false
                 self.model.transcript = ""
@@ -102,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKey.onDown = { [weak self] in
             guard let self else { return }
             guard self.dictation.isReady else { self.flashHUD("warming up…"); return }
+            self.dictation.trigger = Settings.shared.mode
             Settings.shared.mode == "hold" ? self.dictation.start() : self.dictation.toggle()
         }
         hotKey.onUp = { [weak self] in

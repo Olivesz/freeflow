@@ -72,12 +72,12 @@ final class AppModel: ObservableObject {
     @Published var history: [Dictation_Entry] = HistoryStore.shared.entries
 
     /// Record a finished dictation into history (persisted + published), and
-    /// keep its audio when the user opted in.
-    func recordHistory(_ text: String, audio: [Float], engine: String) {
-        guard let entry = HistoryStore.shared.add(text) else { return }
-        history = HistoryStore.shared.entries
+    /// into the session log when the user opted in. History and the log share
+    /// the dictation's id, so a fix in History becomes the session's reference.
+    func recordHistory(_ trace: SessionTrace) {
+        if HistoryStore.shared.add(trace.typed, id: trace.id) != nil { history = HistoryStore.shared.entries }
         if keepRecordings {
-            RecordingStore.shared.save(id: entry.id, audio: audio, typed: entry.text, model: engine)
+            SessionLog.shared.record(trace)
             recordingCount += 1
         }
     }
@@ -87,8 +87,9 @@ final class AppModel: ObservableObject {
     func correct(_ id: UUID, to text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
+        let typed = history.first { $0.id == id }?.text
         HistoryStore.shared.setCorrected(id: id, text: t)
-        RecordingStore.shared.setCorrected(id: id, text: t)
+        SessionLog.shared.setReference(id: id, text: t, kind: t == typed ? "confirmed" : "fixed")
         history = HistoryStore.shared.entries
     }
 
@@ -104,9 +105,9 @@ final class AppModel: ObservableObject {
     @Published var keepRecordings = Settings.shared.keepRecordings {
         didSet { Settings.shared.keepRecordings = keepRecordings }
     }
-    @Published var recordingCount = RecordingStore.shared.count
+    @Published var recordingCount = SessionLog.shared.count
     func deleteRecordings() {
-        RecordingStore.shared.deleteAll()
+        SessionLog.shared.deleteAll()
         recordingCount = 0
     }
     func clearHistory() {

@@ -113,11 +113,12 @@ are in [`bench/`](bench/).
 
 - **Words tab.** "heard → types" corrections, applied to every dictation:
   names, jargon, anything it keeps getting wrong.
-- **Your own benchmark.** Turn on "Keep recordings for tuning" and recordings
-  stay on the Mac. In History, the check marks a transcript right and the
-  pencil fixes it; [`bench/personal.py`](bench/personal.py) turns the reviewed
-  ones into a benchmark of your voice, so any engine or setting can be scored
-  on how you actually talk. Nothing leaves the machine or goes into git.
+- **Your own benchmark.** Turn on "Keep recordings for tuning" and every
+  dictation is logged on the Mac: audio, each decoder pass, each auto-stop
+  decision, and what you later did to the text it typed. In History, the check
+  marks a transcript right and the pencil fixes it.
+  [`bench/voice/`](bench/voice/) turns the log into a benchmark of how you
+  actually talk. Nothing leaves the machine or goes into git.
 - **Engine.** Setup switches between Parakeet and Whisper.
 
 Feeding the vocabulary to the model itself (CTC keyword boosting) was tried:

@@ -1,0 +1,10 @@
+# bench/voice: analysis of your own dictation sessions (Apple silicon).
+jiwer==4.0.0
+mlx-whisper==0.4.3
+numpy==2.5.4
+pandas==2.3.3
+parakeet-mlx==0.5.3
+scipy==1.16.2
+soundfile==0.14.0
+statsmodels==0.14.5
+whisper_normalizer==0.1.15
