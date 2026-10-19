@@ -34,14 +34,18 @@ public final class StreamingSession {
     public func reset() { streamer.reset(); passes = [] }
 
     /// True when the latest decoder pass ends mid-sentence: its last real word
-    /// can't end one ("because", "the", "inter-") or carries no closing
-    /// punctuation. The endpointer waits longer then: the speaker is
-    /// mid-thought. False before anything has been heard.
+    /// can't end one ("because", "the", "inter-") or ends in a comma, colon or
+    /// semicolon. The endpointer waits longer then: the speaker is mid-thought.
+    /// False before anything has been heard.
+    ///
+    /// A missing period is not a signal: the window's trailing silence is cut
+    /// before decoding, so Parakeet hears speech stop dead and leaves the last
+    /// word of a finished sentence bare ("…inward joy"), every tick.
     public var sentenceOpen: Bool {
         guard let last = passes.last?.hypothesis.last(where: {
             $0.text.rangeOfCharacter(from: .letters) != nil
         }) else { return false }
-        return last.continuesSentence || !last.endsSentence
+        return last.continuesSentence || last.endsClause
     }
 
     /// One live tick over everything captured so far. Returns newly-stable words.

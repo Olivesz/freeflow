@@ -120,6 +120,12 @@ extension Word {
         return ".?!".contains(last)
     }
 
+    /// True when the word ends in , ; or : and so leaves its sentence open.
+    public var endsClause: Bool {
+        guard let last = text.trimmingCharacters(in: .whitespaces).last else { return false }
+        return ",;:".contains(last)
+    }
+
     /// True when a sentence can't end on this word: a function word that needs
     /// what follows ("because", "and", "the", "when", "than", "is"…) or a cut-off
     /// fragment ("inter-"). Judged on the word, not its punctuation: Whisper

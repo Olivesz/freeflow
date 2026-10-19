@@ -142,6 +142,13 @@ enum PauseBench {
             }
             k += SelfTest.tickSamples
         }
+        if stopCurrent == nil, ProcessInfo.processInfo.environment["PB_DEBUG"] != nil {
+            let tail = session.passes.suffix(3).map { p in
+                String(format: "[end %.2f] ", p.audioEnd) + p.hypothesis.suffix(4).map { "«\($0.text)»" }.joined(separator: " ")
+            }
+            print("  current never stopped, open=\(session.sentenceOpen), \(session.passes.count) passes; last:\n    "
+                  + tail.joined(separator: "\n    "))
+        }
         return [("shipped", stopShipped), ("current", stopCurrent)]
     }
 

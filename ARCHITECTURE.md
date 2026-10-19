@@ -65,9 +65,11 @@ accurate with context, uses a longer one (`Config.parakeet`).
 Speech is anything well above the room's noise floor, estimated from the
 quietest 50 ms frames of the last few seconds, so a quiet voice in a quiet room
 still counts and a noisy room never makes it stricter than a fixed threshold.
-When the transcript so far ends mid-sentence (no final punctuation, or a word
-like "and", "because", "the"), the silence allowed is tripled, so pausing to
-think doesn't cut the sentence off.
+When the transcript so far ends mid-sentence (on a word like "and", "because"
+or "the", or on a comma), the silence allowed is tripled, so pausing to think
+doesn't cut the sentence off. A missing period doesn't count: the decoder
+never hears the silence after the last word, so a finished sentence often
+ends bare.
 
 ### Edits (`TextProcessor`)
 

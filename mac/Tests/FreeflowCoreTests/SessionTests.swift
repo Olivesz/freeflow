@@ -133,6 +133,21 @@ final class SessionTests: XCTestCase {
         XCTAssertTrue(session.sentenceOpen)                          // "…Because"
     }
 
+    /// Parakeet leaves the last word bare when the window's silence is cut:
+    /// a bare word is a finished thought, a trailing comma is not.
+    func testBareLastWordIsClosedTrailingCommaIsOpen() async throws {
+        let decoder = Scripted([
+            [Word(text: " inward", start: 0, end: 0.4), Word(text: " joy", start: 0.4, end: 0.8)],
+            [Word(text: " little", start: 0.4, end: 0.8), Word(text: " fir", start: 0.8, end: 1.0),
+             Word(text: " tree,", start: 1.0, end: 1.3)],
+        ])
+        let session = StreamingSession()
+        _ = try await session.tick(audio: speech(1.0), decoder: decoder)
+        XCTAssertFalse(session.sentenceOpen)                         // "…inward joy"
+        _ = try await session.tick(audio: speech(1.4), decoder: decoder)
+        XCTAssertTrue(session.sentenceOpen)                          // "…fir tree,"
+    }
+
     func testTrailingSilenceIsCutWithPadding() {
         let audio = speech(1.0) + [Float](repeating: 0, count: 16000)
         let cut = Audio.trimTrailingSilence(audio)
